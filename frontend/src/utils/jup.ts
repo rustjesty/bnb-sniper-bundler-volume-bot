@@ -7,7 +7,7 @@ import { Token, ChainId } from '@lifi/sdk';
 // Constants
 const JUPITER_API = {
   TOKENS: 'https://tokens.jup.ag/tokens?tags=verified',
-  TOKEN_BY_MINT: 'https://tokens.jup.ag/token',
+  TOKEN_BY_MINT: 'https://tokens.jup.ag/token', 
   TRADABLE_TOKENS: 'https://tokens.jup.ag/tokens_with_markets',
   PRICE: 'https://api.jup.ag/price/v2',
   QUOTE: 'https://quote-api.jup.ag/v6'
@@ -47,6 +47,7 @@ interface RoutePlan {
 }
 
 interface SwapQuote {
+  slippageBps: number;
   inputMint: string;
   outputMint: string;
   inAmount: string;
@@ -68,6 +69,9 @@ interface SwapResult {
 }
 
 interface TokenMetadata {
+  name: any;
+  price: any;
+  liquidity: any;
   coingeckoData: any;
   coingeckoId: string;
   dailyVolume: number;
@@ -92,7 +96,10 @@ export async function getTokenInfo(mintAddress: string): Promise<TokenMetadata |
       coingeckoData: null, // or fetch actual coingecko data if needed
       coingeckoId: data.extensions.coingeckoId,
       dailyVolume: data.daily_volume,
-      symbol: data.symbol // Add this line
+      symbol: data.symbol,
+      name: data.name,
+      price: data.price,
+      liquidity: null // You might want to fetch this from another source
     };
   } catch (error) {
     logger.error('Error fetching Jupiter token info:', error);
@@ -348,6 +355,50 @@ export async function executeSwap(fromToken: string, toToken: string, amountInSo
   } catch (error) {
     logger.error('Error executing swap:', error);
     return 'Unable to execute swap at the moment.';
+  }
+}
+
+/**
+ * Get Jupiter swap details
+ */
+export async function getJupiterInfo(amountInSol: number): Promise<string> {
+  try {
+    const quote = await getSwapQuote(amountInSol);
+    if (!quote) {
+      return "No quote available for these parameters.";
+    }
+    
+    const inAmount = Number(quote.inAmount) / LAMPORTS_PER_SOL;
+    const outAmount = Number(quote.outAmount) / Math.pow(10, 6); // USDC decimals
+    
+    return `Jupiter Swap Details:
+Input: ${inAmount.toFixed(4)} SOL
+Output: ${outAmount.toFixed(2)} USDC
+Price Impact: ${quote.priceImpactPct}%
+Slippage: ${quote.slippageBps / 100}%`;
+  } catch (error) {
+    logger.error('Failed to fetch Jupiter quote:', error);
+    return "Failed to fetch Jupiter quote.";
+  }
+}
+
+/**
+ * Execute Jupiter swap
+ */
+export async function executeJupiterSwap(amountInSol: number, outputMint: string): Promise<string> {
+  try {
+    const result = await swapSolToToken(amountInSol, outputMint);
+    
+    if (result.status === 'success') {
+      return `Swap Executed:
+Amount: ${amountInSol} SOL
+Signature: ${result.signature}`;
+    } else {
+      return `Swap Failed: ${result.message}`;
+    }
+  } catch (error) {
+    logger.error('Failed to execute swap:', error);
+    return "Failed to execute swap.";
   }
 }
 

@@ -145,4 +145,4 @@ export type {
   DocumentChunk,
   RetrievalResult,
   RetrievalOptions
-};
+}; 

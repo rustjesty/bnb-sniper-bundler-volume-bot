@@ -1,25 +1,102 @@
+// Core imports
 import { Groq } from 'groq-sdk';
+import { LAMPORTS_PER_SOL, PublicKey, Connection, Transaction } from '@solana/web3.js';
+import { SolanaAgentKit } from 'solana-agent-kit';
+
+// Local utility imports
 import { getSolanaPrice, getTrendingSolanaTokens } from './coingecko';
 import { getSolanaBalance, getTransactionDetails } from './helius';
-import { validateSolanaAddress, validateTransactionHash } from './validation';
+import { formatAddress, validateSolanaAddress, validateTransactionHash, validateTransactionParams } from './validation';
 import { agentWallet } from './wallet';
-import { getTokenInfo, swapSolToToken, executeSwap } from './jup';
-import { LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
+import { getTokenInfo, swapSolToToken, executeSwap, getSwapQuote } from './jup';
 import { requestDevnetAirdrop } from './airdrop';
 import logger from './logger';
-import {  getSwapQuote } from './jup';
 import { getTrendingTokens } from './birdeye';
-import { trade } from '@/tools/jupiter';
 
-const BALANCE_CACHE_DURATION = 10000; // 10 seconds
-const balanceCache = new Map<string, {
-  balance: number;
-  timestamp: number;
-}>(); 
+// Document and template imports
+import { SYSTEM_TEMPLATE } from './DefaultRetrievalText';
+import { processDocuments, formatRetrievalResults, DocumentChunk, RetrievalOptions } from './DocumentRetrieval';
+
+// Tool and feature imports
+import { getSignature } from './getSignature';
+import { fetch_tx, calc_tx_freq, calc_vol, calc_profitability, calc_dex_diversity, calc_stabel_token_vol, calc_final_score } from './helper';
+import { ScoringWalletKit } from './scoringWallet';
+import markdownToHTML from './markdownToHTML';
+import { getPortfolio, rebalancePortfolio } from './portfolio';
+import { TransactionProcessor } from './transactions';
+import { transactionSenderAndConfirmationWaiter } from './transactionSender';
+import { create_image } from '@/tools/agent/create_image';
+import { getTokenDataByAddress, getTokenDataByTicker } from '@/tools/dexscreener';
+import { getAssetsByOwner } from '@/tools/helius';
+import { getRecentTransactions } from '@/tools/helius/get_recent_transactions';
+import { parseTransaction } from '@/tools/helius/helius_transaction_parsing';
+import { sendTransactionWithPriorityFee } from '@/tools/helius/send_transaction_with_priority';
+import { stakeWithJup } from '@/tools/jupiter/stake_with_jup';
+import { trade } from '@/tools/jupiter/trade';
+import { openbookCreateMarket } from '@/tools/openbook/openbook_create_market';
+import { launchPumpFunToken } from '@/tools/pumpfun/launch_pumpfun_token';
+import { swapTool } from '@/tools/swap';
+import { CHAT_TEMPLATE, CONDENSE_QUESTION_TEMPLATE, QA_TEMPLATE, REPHRASE_TEMPLATE } from './RetrievalPrompts';
 
 // Constants
+const BALANCE_CACHE_DURATION = 10000; // 10 seconds
+const balanceCache = new Map<string, { balance: number; timestamp: number }>();
+
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
 const JENNA_TOKEN_ADDRESS = '8hVzPgFopqEQmNNoghr5WbPY1LEjW8GzgbLRwuwHpump';
+
+// Templates and Personalities
+const JENNA_PERSONALITY = `You are JENNA, a specialized AI assistant focused on Solana blockchain and cryptocurrency trading.
+- Always maintain a professional but friendly tone
+- Focus on providing accurate, data-driven insights
+- Explain complex concepts clearly and concisely
+- Stay up-to-date with Solana ecosystem developments
+- Prioritize risk management and responsible trading practices
+- If unsure, acknowledge limitations rather than speculate`;
+
+// Interfaces and Types
+interface PromptConfig {
+  maxTokens: number;
+  temperature: number;
+  topP: number;
+}
+
+interface Message {
+  role: string;
+  content: string;
+  name?: string;
+  function_call?: any;
+}
+
+// Configurations
+const DEFAULT_CONFIGS: Record<string, PromptConfig> = {
+  condense: {
+    maxTokens: 256,
+    temperature: 0.7,
+    topP: 1.0
+  },
+  qa: {
+    maxTokens: 512,
+    temperature: 0.8,
+    topP: 0.9
+  },
+  chat: {
+    maxTokens: 1024,
+    temperature: 0.9,
+    topP: 0.95
+  },
+  rephrase: {
+    maxTokens: 256,
+    temperature: 0.7,
+    topP: 0.9
+  }
+};
+
+const RATE_LIMIT = {
+  MAX_RETRIES: 3,
+  RETRY_DELAY: 3500,
+  TOKEN_LIMIT: 5000
+};
 
 // Available functions for the AI
 const functions = [
@@ -175,55 +252,496 @@ const functions = [
       },
       required: ['mintAddress']
     }
+  },
+  {
+    name: 'getTokenInfo',
+    description: 'Get detailed information about a specific token',
+    parameters: {
+      type: 'object',
+      properties: {
+        mintAddress: {
+          type: 'string',
+          description: 'Token mint address to get information for'
+        }
+      },
+      required: ['mintAddress']
+    }
+  },
+  {
+    name: 'getSolanaBalance',
+    description: 'Get SOL balance for a wallet address',
+    parameters: {
+      type: 'object',
+      properties: {
+        address: {
+          type: 'string',
+          description: 'Solana wallet address'
+        }
+      },
+      required: ['address']
+    }
+  },
+  {
+    name: 'getSolanaBalanceDetails',
+    description: 'Get detailed SOL balance including USD value',
+    parameters: {
+      type: 'object',
+      properties: {
+        address: {
+          type: 'string',
+          description: 'Solana wallet address'
+        }
+      },
+      required: ['address']
+    }
+  },
+  {
+    name: 'getDetailedTransaction',
+    description: 'Get detailed transaction information',
+    parameters: {
+      type: 'object',
+      properties: {
+        signature: {
+          type: 'string',
+          description: 'Transaction signature'
+        }
+      },
+      required: ['signature']
+    }
+  },
+  {
+    name: 'analyzeWalletActivity',
+    description: 'Analyze wallet transaction patterns and activity',
+    parameters: {
+      type: 'object',
+      properties: {
+        address: {
+          type: 'string',
+          description: 'Wallet address to analyze'
+        },
+        transactionLimit: {
+          type: 'number',
+          description: 'Number of transactions to analyze',
+          default: 10
+        }
+      },
+      required: ['address']
+    }
+  },
+  {
+    name: 'handleMarkdownResponse',
+    description: 'Convert markdown response to HTML',
+    parameters: {
+      type: 'object',
+      properties: {
+        markdown: {
+          type: 'string',
+          description: 'Markdown content to convert'
+        }
+      },
+      required: ['markdown']
+    }
+  },
+  {
+    name: 'getPortfolioStatus',
+    description: 'Get wallet portfolio status',
+    parameters: {
+      type: 'object',
+      properties: {
+        walletAddress: {
+          type: 'string',
+          description: 'Wallet address'
+        }
+      },
+      required: ['walletAddress']
+    }
+  },
+  {
+    name: 'executeRebalance',
+    description: 'Execute portfolio rebalancing',
+    parameters: {
+      type: 'object',
+      properties: {
+        walletAddress: {
+          type: 'string',
+          description: 'Wallet address'
+        },
+        targetAllocation: {
+          type: 'object',
+          description: 'Target allocation percentages',
+          additionalProperties: {
+            type: 'string'
+          }
+        }
+      },
+      required: ['walletAddress', 'targetAllocation']
+    }
+  },
+  {
+    name: 'condenseQuestion',
+    description: 'Condense a follow-up question with chat history context',
+    parameters: {
+      type: 'object',
+      properties: {
+        chatHistory: {
+          type: 'string',
+          description: 'Previous chat history'
+        },
+        question: {
+          type: 'string',
+          description: 'Follow-up question'
+        }
+      },
+      required: ['chatHistory', 'question']
+    }
+  },
+  {
+    name: 'rephraseMessage',
+    description: 'Rephrase message to be clearer and Solana-trading focused',
+    parameters: {
+      type: 'object',
+      properties: {
+        message: {
+          type: 'string',
+          description: 'Message to rephrase'
+        }
+      },
+      required: ['message']
+    }
+  },
+  {
+    name: 'getWalletScoring',
+    description: 'Get detailed wallet activity scoring',
+    parameters: {
+      type: 'object',
+      properties: {
+        walletAddress: {
+          type: 'string',
+          description: 'Wallet address to analyze'
+        },
+        rpcUrl: {
+          type: 'string',
+          description: 'RPC URL for connection',
+          default: 'https://api.mainnet-beta.solana.com'
+        }
+      },
+      required: ['walletAddress']
+    }
+  },
+  {
+    name: 'getWalletHistory',
+    description: 'Get wallet transaction history',
+    parameters: {
+      type: 'object',
+      properties: {
+        address: {
+          type: 'string',
+          description: 'Wallet address'
+        },
+        limit: {
+          type: 'number',
+          description: 'Number of transactions',
+          default: 10
+        }
+      },
+      required: ['address']
+    }
+  },
+  {
+    name: 'calculateWalletRisk',
+    description: 'Calculate wallet risk metrics',
+    parameters: {
+      type: 'object',
+      properties: {
+        address: {
+          type: 'string',
+          description: 'Wallet address'
+        }
+      },
+      required: ['address']
+    }
+  },
+  {
+    name: 'analyzeDexUsage',
+    description: 'Analyze DEX usage patterns',
+    parameters: {
+      type: 'object',
+      properties: {
+        address: {
+          type: 'string',
+          description: 'Wallet address'
+        }
+      },
+      required: ['address']
+    }
+  },
+  {
+    name: 'getDetailedTransactionHistory',
+    description: 'Get detailed transaction history for a wallet',
+    parameters: {
+      type: 'object',
+      properties: {
+        address: {
+          type: 'string',
+          description: 'Wallet address'
+        },
+        limit: {
+          type: 'number',
+          description: 'Number of transactions',
+          default: 10
+        }
+      },
+      required: ['address']
+    }
+  },
+  {
+    name: 'getWalletMetrics',
+    description: 'Get transaction metrics for wallet',
+    parameters: {
+      type: 'object',
+      properties: {
+        address: {
+          type: 'string',
+          description: 'Wallet address'
+        }
+      },
+      required: ['address']
+    }
+  },
+  {
+    name: 'handleTransaction',
+    description: 'Handle transaction sending and confirmation',
+    parameters: {
+      type: 'object',
+      properties: {
+        connection: {
+          type: 'object',
+          description: 'Solana connection object'
+        },
+        serializedTx: {
+          type: 'string',
+          description: 'Serialized transaction buffer'
+        },
+        blockhash: {
+          type: 'object',
+          description: 'Blockhash with expiry'
+        }
+      },
+      required: ['connection', 'serializedTx', 'blockhash']
+    }
+  },
+  {
+    name: 'validateAddress',
+    description: 'Validate a Solana address or transaction',
+    parameters: {
+      type: 'object',
+      properties: {
+        input: {
+          type: 'string',
+          description: 'Address or transaction hash to validate'
+        },
+        type: {
+          type: 'string',
+          enum: ['address', 'transaction'],
+          description: 'Type of validation to perform'
+        }
+      },
+      required: ['input', 'type']
+    }
+  },
+  {
+    name: 'validateTransaction',
+    description: 'Validate transaction parameters',
+    parameters: {
+      type: 'object',
+      properties: {
+        sender: {
+          type: 'string',
+          description: 'Sender address'
+        },
+        recipient: {
+          type: 'string',
+          description: 'Recipient address'
+        },
+        amount: {
+          type: 'number',
+          description: 'Transaction amount'
+        }
+      },
+      required: ['sender', 'recipient', 'amount']
+    }
+  },
+  {
+    name: 'initializeWallet',
+    description: 'Initialize agent wallet connection',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  {
+    name: 'getWalletConnection',
+    description: 'Get active RPC connection status',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: []
+    }
+  },
+  {
+    name: 'processWalletText',
+    description: 'Process and analyze wallet text input',
+    parameters: {
+      type: 'object',
+      properties: {
+        text: {
+          type: 'string',
+          description: 'Text to analyze'
+        }
+      },
+      required: ['text']
+    }
+  },
+  {
+    name: 'generateImage',
+    description: 'Generate images using Groq',
+    parameters: {
+      type: 'object',
+      properties: {
+        prompt: {
+          type: 'string',
+          description: 'Image description'
+        },
+        size: {
+          type: 'string',
+          enum: ['256x256', '512x512', '1024x1024'],
+          default: '1024x1024'
+        },
+        n: {
+          type: 'number',
+          description: 'Number of images',
+          default: 1
+        }
+      },
+      required: ['prompt']
+    }
+  },
+  {
+    name: 'getTokenData',
+    description: 'Get token data from Jupiter',
+    parameters: {
+      type: 'object',
+      properties: {
+        input: {
+          type: 'string',
+          description: 'Token address or ticker'
+        },
+        byTicker: {
+          type: 'boolean',
+          description: 'Search by ticker instead of address',
+          default: false
+        }
+      },
+      required: ['input']
+    }
+  },
+  {
+    name: 'getTokenDataInfo',
+    description: 'Get detailed token data',
+    parameters: {
+      type: 'object',
+      properties: {
+        input: {
+          type: 'string',
+          description: 'Token address or ticker'
+        },
+        inputType: {
+          type: 'string',
+          enum: ['address', 'ticker'],
+          default: 'address'
+        }
+      },
+      required: ['input']
+    }
+  },
+  {
+    name: 'getWalletAssets',
+    description: 'Get token assets owned by a wallet',
+    parameters: {
+      type: 'object',
+      properties: {
+        address: {
+          type: 'string',
+          description: 'Wallet address'
+        },
+        limit: {
+          type: 'number',
+          description: 'Number of assets to retrieve',
+          default: 10
+        }
+      },
+      required: ['address']
+    }
+  },
+  {
+    name: 'getRecentTxs',
+    description: 'Get recent transactions for a wallet',
+    parameters: {
+      type: 'object',
+      properties: {
+        address: {
+          type: 'string',
+          description: 'Wallet address'
+        }
+      },
+      required: ['address']
+    }
+  },
+  {
+    name: 'parseTransaction',
+    description: 'Parse a Solana transaction using Helius API',
+    parameters: {
+      type: 'object',
+      properties: {
+        transactionId: {
+          type: 'string',
+          description: 'Transaction ID to parse'
+        }
+      },
+      required: ['transactionId']
+    }
+  },
+  {
+    name: 'sendHighPriorityTransaction',
+    description: 'Send a transaction with high priority fee',
+    parameters: {
+      type: 'object',
+      properties: {
+        priorityLevel: {
+          type: 'string',
+          description: 'Priority level for the transaction'
+        },
+        amount: {
+          type: 'number',
+          description: 'Amount of SOL to send'
+        },
+        to: {
+          type: 'string',
+          description: 'Recipient wallet address'
+        },
+        splmintAddress: {
+          type: 'string',
+          description: 'SPL token mint address (optional)',
+          default: null
+        }
+      },
+      required: ['priorityLevel', 'amount', 'to']
+    }
   }
 ];
 
-// Types
-interface Message {
-  role: 'system' | 'user' | 'assistant' | 'function';
-  content: string;
-  name?: string;  // Optional
-  function_call?: {
-    name: string;
-    arguments: string;
-  };
-}
-
-// JENNA's personality and system prompt
-const JENNA_PERSONALITY = `You are JENNA, a professional Solana trading assistant with the following traits:
-
-Core Traits:
-- You provide clear, accurate market analysis and trading insights
-- You focus on helping users understand Solana markets and trading
-- You maintain a professional but approachable demeanor
-- You prioritize accuracy and clarity in your responses
-
-Key Information:
-- Your token address: ${JENNA_TOKEN_ADDRESS}
-- Token URL: https://pump.fun/coin/${JENNA_TOKEN_ADDRESS}
-
-Response Guidelines:
-- Keep responses concise and focused on providing value
-- Use technical terms appropriately
-- Provide clear explanations when discussing complex topics
-- Be direct and professional in your communication
-- Only show data visualization or memes when specifically relevant
-
-Trading Focus:
-- Emphasize market analysis and trading opportunities
-- Provide context for market movements
-- Explain technical concepts clearly when needed
-- Focus on Solana ecosystem developments`;
-
-
-// Rate limiting
-const RATE_LIMIT = {
-  MAX_RETRIES: 3,
-  RETRY_DELAY: 3500, // ms
-  TOKEN_LIMIT: 5000
-};
-
-// Create Groq client with retry mechanism
+// Core client functions
 const createGroqClient = (apiKey: string) => {
   return new Groq({
     apiKey,
@@ -231,10 +749,9 @@ const createGroqClient = (apiKey: string) => {
   });
 };
 
-// Helper to delay execution
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// API key validation
+// Main API functions
 export async function validateApiKey(apiKey: string): Promise<boolean> {
   try {
     const groq = createGroqClient(apiKey);
@@ -249,7 +766,33 @@ export async function validateApiKey(apiKey: string): Promise<boolean> {
   }
 }
 
-// Main streaming completion function with retries
+// Helper functions
+function generateSystemMessage(context: string, chatHistory: string, templateType: 'system' | 'qa' | 'chat'): string {
+  let template;
+  switch (templateType) {
+    case 'qa':
+      template = QA_TEMPLATE;
+      break;
+    case 'chat':
+      template = CHAT_TEMPLATE;
+      break;
+    case 'system':
+    default:
+      template = SYSTEM_TEMPLATE;
+      break;
+  }
+  return template.replace('{context}', context).replace('{chat_history}', chatHistory);
+}
+
+export async function retrieveAndFormatDocuments(
+  documents: DocumentChunk[],
+  options: RetrievalOptions = {}
+): Promise<string> {
+  const results = await processDocuments(documents, options);
+  return formatRetrievalResults(results);
+}
+
+// Main streaming completion function
 export async function streamCompletion(
   messages: Message[],
   onChunk: (chunk: string) => void,
@@ -260,6 +803,13 @@ export async function streamCompletion(
 
   const groq = createGroqClient(apiKey);
   let retries = 0;
+
+  // Create an instance of SolanaAgentKit
+  const agent = new SolanaAgentKit(
+    process.env.SOLANA_PRIVATE_KEY!,  // Provide the private key
+    'https://api.mainnet-beta.solana.com', // Provide the RPC URL
+    apiKey // Provide the OpenAI API key
+  );
 
   while (retries < RATE_LIMIT.MAX_RETRIES) {
     try {
@@ -316,21 +866,28 @@ export async function streamCompletion(
           try {
             let result;
             switch (functionName) {
+             
+              case 'stakeWithJup':
+                const { amount } = JSON.parse(functionArgs);
+                result = await stakeWithJup(agent, amount);
+                onChunk(`\nStaking Transaction Signature: ${ result } \n`);
+                break;
+              
               case 'getSolanaPrice':
                 result = await getSolanaPrice();
-                onChunk(`\nCurrent Solana Market Data:\n\n`);
-                onChunk(`Price: $${result.price.toFixed(2)}\n`);
-                onChunk(`24h Change: ${result.price_change_24h.toFixed(2)}%\n`);
-                onChunk(`Market Cap: $${(result.market_cap / 1e9).toFixed(2)}B\n`);
+                onChunk(`\nCurrent Solana Market Data: \n\n`);
+                onChunk(`Price: $${ result.price.toFixed(2) } \n`);
+                onChunk(`24h Change: ${ result.price_change_24h.toFixed(2) }%\n`);
+                onChunk(`Market Cap: $${ (result.market_cap / 1e9).toFixed(2) } B\n`);
                 break;
 
               case 'getTrendingSolanaTokens':
                 result = await getTrendingSolanaTokens();
                 onChunk('\nTrending Solana Tokens:\n\n');
                 result.forEach((token, index) => {
-                  onChunk(`${index + 1}. ${token.name} (${token.symbol})\n`);
-                  onChunk(`   Price: $${token.price.toFixed(6)}\n`);
-                  onChunk(`   24h Change: ${token.price_change_24h.toFixed(2)}%\n\n`);
+                  onChunk(`${ index + 1 }. ${ token.name } (${ token.symbol }) \n`);
+                  onChunk(`   Price: $${ token.price.toFixed(6) } \n`);
+                  onChunk(`   24h Change: ${ token.price_change_24h.toFixed(2) }%\n\n`);
                 });
                 break;
 
@@ -342,9 +899,9 @@ export async function streamCompletion(
                 }
                 
                 const balanceResult = await getCachedBalance(address);
-                onChunk(`\nWallet Balance:\n\n`);
-                onChunk(`SOL: ${balanceResult.toFixed(4)}\n`);
-                onChunk(`USD Value: $${(balanceResult * (await getSolanaPrice()).price).toFixed(2)}\n`);
+                onChunk(`\nWallet Balance: \n\n`);
+                onChunk(`SOL: ${ balanceResult.toFixed(4) } \n`);
+                onChunk(`USD Value: $${ (balanceResult * (await getSolanaPrice()).price).toFixed(2) } \n`);
                 break;
 
               case 'reviewTransaction':
@@ -352,17 +909,19 @@ export async function streamCompletion(
                 if (!validateTransactionHash(hash)) {
                   onChunk("\nInvalid transaction hash. Please provide a valid Solana transaction signature.\n");
                   break;
-                }
+                } 
 
                 const txDetails = await getTransactionDetails(hash);
-                onChunk(`\nTransaction Details:\n\n`);
-                onChunk(`Status: ${txDetails.status}\n`);
-                onChunk(`Timestamp: ${txDetails.timestamp}\n`);
+                const signature = getSignature(txDetails as unknown as Transaction); 
+                onChunk(`\nTransaction Details: \n\n`);
+                onChunk(`Status: ${ txDetails.status } \n`);
+                onChunk(`Timestamp: ${ txDetails.timestamp } \n`);
+                onChunk(`Signature: ${ signature } \n`);
                 if (txDetails.amount) {
-                  onChunk(`Amount: ${(txDetails.amount / LAMPORTS_PER_SOL).toFixed(4)} SOL\n`);
+                  onChunk(`Amount: ${ (txDetails.amount / LAMPORTS_PER_SOL).toFixed(4) } SOL\n`);
                 }
                 if (txDetails.fee) {
-                  onChunk(`Fee: ${txDetails.fee} SOL\n`);
+                  onChunk(`Fee: ${ txDetails.fee } SOL\n`);
                 }
                 break;
 
@@ -371,10 +930,10 @@ export async function streamCompletion(
                 const solPrice = (await getSolanaPrice()).price;
                 const usdBalance = walletInfo.balance * solPrice;
                 
-                onChunk(`\nJENNA Wallet Status:\n\n`);
-                onChunk(`Balance: ${walletInfo.balance.toFixed(4)} SOL\n`);
-                onChunk(`USD Value: $${usdBalance.toFixed(2)}\n`);
-                onChunk(`Address: ${walletInfo.address}\n`);
+                onChunk(`\nJENNA Wallet Status: \n\n`);
+                onChunk(`Balance: ${ walletInfo.balance.toFixed(4) } SOL\n`);
+                onChunk(`USD Value: $${ usdBalance.toFixed(2) } \n`);
+                onChunk(`Address: ${ walletInfo.address } \n`);
                 break;
 
               case 'requestDevnetAirdrop':
@@ -385,29 +944,623 @@ export async function streamCompletion(
                 }
 
                 const airdropResult = await requestDevnetAirdrop(airdropAddress);
-                onChunk(`\nDevnet Airdrop Status:\n\n`);
-                onChunk(`Status: ${airdropResult.status}\n`);
+                onChunk(`\nDevnet Airdrop Status: \n\n`);
+                onChunk(`Status: ${ airdropResult.status } \n`);
                 if (airdropResult.signature) {
-                  onChunk(`Signature: ${airdropResult.signature}\n`);
+                  onChunk(`Signature: ${ airdropResult.signature } \n`);
                 }
                 break;
 
               case 'swapSolToToken':
-                const { amountInSol, outputMint = USDC_MINT } = JSON.parse(functionArgs);
+                const { amountInSol, outputMint: targetMint = USDC_MINT } = JSON.parse(functionArgs);
                 
                 if (amountInSol < 0.001) {
                   onChunk("\nMinimum swap amount is 0.001 SOL.\n");
                   break;
                 }
 
-                const swapResult = await swapSolToToken(amountInSol, outputMint);
+                const swapResult = await swapSolToToken(amountInSol, targetMint);
                 if (swapResult.status === 'success') {
-                  onChunk(`\nSwap Executed Successfully:\n\n`);
-                  onChunk(`Amount: ${amountInSol} SOL\n`);
-                  onChunk(`Signature: ${swapResult.signature}\n`);
+                  onChunk(`\nSwap Executed Successfully: \n\n`);
+                  onChunk(`Amount: ${ amountInSol } SOL\n`);
+                  onChunk(`Signature: ${ swapResult.signature } \n`);
                 } else {
-                  onChunk(`\nSwap Failed: ${swapResult.message}\n`);
+                  onChunk(`\nSwap Failed: ${ swapResult.message } \n`);
                 }
+                break;
+
+              case 'getJupiterQuote':
+                const quoteParams = JSON.parse(functionArgs);
+                try {
+                  const quote = await getSwapQuote(
+                    Number(quoteParams.amount),
+                    quoteParams.outputMint
+                  );
+                  
+                  if (quote) {
+                    onChunk(`\nSwap Quote Details: \n\n`);
+                    onChunk(`Input Amount: ${ quote.inAmount } \n`);
+                    onChunk(`Output Amount: ${ quote.outAmount } \n`);
+                    onChunk(`Price Impact: ${ Number(quote.priceImpactPct).toFixed(2) }%\n`);
+                    onChunk(`Slippage: ${ quote.slippageBps / 100 }%\n`);
+                  } else {
+                    onChunk("\nNo quote available for these parameters.\n");
+                  }
+                } catch (error) {
+                  onChunk("\nFailed to fetch swap quote. Please verify token addresses and amount.\n");
+                }
+                break;
+
+              case 'getTrendingTokensData': 
+                try {
+                  const { limit = 10 } = JSON.parse(functionArgs);
+                  const trendingTokens = await getTrendingTokens();
+                  
+                  onChunk('\nTrending Tokens on Birdeye:\n\n');
+                  trendingTokens.slice(0, limit).forEach((token, index) => {
+                    onChunk(`${ index + 1 }. ${ token.name } (${ token.symbol }) \n`);
+                    onChunk(`   Price: $${ token.price.toFixed(6) } \n`);
+                    onChunk(`   24h Volume: $${ token.volume24h.toLocaleString() } \n`);
+                    onChunk(`   Liquidity: $${ token.liquidity.toLocaleString() } \n\n`);
+                  });
+                } catch (error) {
+                  onChunk("\nFailed to fetch trending tokens data. Please try again later.\n");
+                }
+                break;
+
+              case 'getTokenInfo':
+                const { mintAddress } = JSON.parse(functionArgs);
+                result = await getTokenInfo(mintAddress);
+                if (result) {
+                  onChunk(`\nToken Information: \n\n`);
+                  onChunk(`Name: ${ result.name } \n`);
+                  onChunk(`Symbol: ${ result.symbol } \n`);
+                  onChunk(`Price: $${ result.price.toFixed(6) } \n`);
+                  onChunk(`Liquidity: $${ result.liquidity.toFixed(2) } \n`);
+                } else {
+                  onChunk("\nToken information not found.\n");
+                }
+                break;
+
+              case 'getSolanaBalance':
+                const { address: solanaAddress } = JSON.parse(functionArgs);
+                if (!validateSolanaAddress(solanaAddress)) {
+                  onChunk("\nInvalid Solana address provided. Please check the address and try again.\n");
+                  break;
+                }
+                const balance = await getSolanaBalance(solanaAddress);
+                onChunk(`\nWallet Balance: \n\n`);
+                onChunk(`SOL: ${ Number(balance).toFixed(4) } \n`);
+                onChunk(`USD Value: $${ (Number(balance) * (await getSolanaPrice()).price).toFixed(2) } \n`);
+                break;
+
+              case 'getSolanaBalanceDetails':
+                try {
+                  const { address } = JSON.parse(functionArgs);
+                  const balanceInfo = await getSolanaBalance(address);
+                  
+                  onChunk(`\nBalance Details: \n`);
+                  onChunk(`SOL Balance: ${ balanceInfo.balance.toFixed(4) } \n`);
+                  onChunk(`USD Value: $${ balanceInfo.balanceInUSD.toFixed(2) } \n`);
+                  onChunk(`Last Updated: ${ balanceInfo.timestamp } \n`);
+                } catch (error) {
+                  onChunk("\nFailed to fetch balance details. Please verify the address.\n");
+                }
+                break;
+
+              case 'getDetailedTransaction':
+                try {
+                  const { signature } = JSON.parse(functionArgs);
+                  const txInfo = await getTransactionDetails(signature);
+
+                  onChunk(`\nTransaction Details: \n`);
+                  onChunk(`Status: ${ txInfo.status } \n`);
+                  onChunk(`Type: ${ txInfo.type } \n`);
+                  onChunk(`Timestamp: ${ txInfo.timestamp } \n`);
+                  if (txInfo.amount) onChunk(`Amount: ${ txInfo.amount } SOL\n`);
+                  if (txInfo.fee) onChunk(`Fee: ${ txInfo.fee } SOL\n`);
+                  if (txInfo.tokenTransfer) {
+                    onChunk(`Token Transfer: ${ txInfo.tokenTransfer.amount } ${ txInfo.tokenTransfer.symbol } \n`);
+                  }
+                } catch (error) {
+                  onChunk("\nFailed to fetch transaction details. Please verify the signature.\n");
+                }
+                break;
+
+              case 'analyzeWalletActivity':
+                try {
+                  const { address, transactionLimit = 10 } = JSON.parse(functionArgs);
+                  const publicKey = new PublicKey(address);
+                  const walletKit = new ScoringWalletKit('https://api.mainnet-beta.solana.com'); // Provide the rpcUrl
+                  
+                  await fetch_tx(walletKit, publicKey, transactionLimit);
+                  
+                  const txFrequency = calc_tx_freq(walletKit);
+                  const volume = calc_vol(walletKit);
+                  const profitability = calc_profitability(walletKit);
+                  const dexDiversity = calc_dex_diversity(walletKit);
+                  const stablecoinVolume = calc_stabel_token_vol(walletKit);
+                  const finalScore = calc_final_score(walletKit);
+
+                  onChunk(`\nWallet Analysis: \n\n`);
+                  onChunk(`Transaction Frequency Score: ${ (txFrequency * 100).toFixed(2) }%\n`);
+                  onChunk(`Trading Volume: ${ volume.toFixed(2) } SOL\n`);
+                  onChunk(`Estimated P & L: ${ profitability.toFixed(2) } SOL\n`);
+                  onChunk(`DEX Diversity Score: ${ (dexDiversity / 10 * 100).toFixed(2) }%\n`);
+                  onChunk(`Stablecoin Volume: $${ stablecoinVolume.toFixed(2) } \n`);
+                  onChunk(`Overall Score: ${ (finalScore * 100).toFixed(2) }%\n`);
+                } catch (error) {
+                  onChunk("\nFailed to analyze wallet activity. Please verify the address and try again.\n");
+                }
+                break;
+
+              case 'handleMarkdownResponse':
+                try {
+                  const { markdown } = JSON.parse(functionArgs);
+                  const html = markdownToHTML(markdown);
+                  onChunk(html);
+                } catch (error) {
+                  onChunk("Failed to convert markdown to HTML");
+                }
+                break;
+
+              case 'getPortfolioStatus':
+                try {
+                  const { walletAddress } = JSON.parse(functionArgs);
+                  const portfolio = await getPortfolio(walletAddress);
+
+                  onChunk(`\nPortfolio Overview: \n`);
+                  onChunk(`Total Value: $${ portfolio.totalValueUSD.toFixed(2) } \n\n`);
+                  onChunk(`Asset Allocation: \n`);
+                  portfolio.assets.forEach(asset => {
+                    onChunk(`${ asset.symbol }: ${ asset.amount.toFixed(4) } ($${ asset.valueUSD.toFixed(2) }) - ${ portfolio.percentages[asset.symbol] } \n`);
+                  });
+                } catch (error) {
+                  onChunk("\nFailed to fetch portfolio data.\n");
+                }
+                break;
+
+              case 'executeRebalance':
+                try {
+                  const { walletAddress, targetAllocation } = JSON.parse(functionArgs);
+                  const currentPortfolio = await getPortfolio(walletAddress);
+                  const result = await rebalancePortfolio(currentPortfolio, targetAllocation, true);
+
+                  onChunk(`\nRebalancing Result: ${ result.status } \n`);
+                  if (result.trades) {
+                    onChunk(`\nRequired Trades: \n`);
+                    result.trades.forEach(trade => {
+                      onChunk(`${ trade.from } -> ${ trade.to }: ${ trade.percentage }%\n`);
+                    });
+                  }
+                  if (result.message) {
+                    onChunk(`\nMessage: ${ result.message } \n`);
+                  }
+                } catch (error) {
+                  onChunk("\nPortfolio rebalancing failed.\n");
+                }
+                break;
+
+              case 'condenseQuestion':
+                try {
+                  const { chatHistory, question } = JSON.parse(functionArgs);
+                  const condensedPrompt = CONDENSE_QUESTION_TEMPLATE
+                    .replace('{chat_history}', chatHistory)
+                    .replace('{question}', question);
+                  
+                  const groqResponse = await groq.chat.completions.create({
+                    model: 'mixtral-8x7b-32768',
+                    messages: [{ role: 'user', content: condensedPrompt }],
+                    ...DEFAULT_CONFIGS.condense
+                  });
+                  
+                  onChunk(groqResponse.choices[0]?.message?.content || '');
+                } catch (error) {
+                  onChunk("\nFailed to condense question.\n");
+                }
+                break;
+
+              case 'rephraseMessage':
+                try {
+                  const { message } = JSON.parse(functionArgs);
+                  const rephrasePrompt = REPHRASE_TEMPLATE.replace('{question}', message);
+                  
+                  const groqResponse = await groq.chat.completions.create({
+                    model: 'mixtral-8x7b-32768',
+                    messages: [{ role: 'user', content: rephrasePrompt }],
+                    ...DEFAULT_CONFIGS.rephrase
+                  });
+                  
+                  onChunk(groqResponse.choices[0]?.message?.content || '');
+                } catch (error) {
+                  onChunk("\nFailed to rephrase message.\n");
+                }
+                break;
+
+              case 'getWalletScoring':
+                try {
+                  const { walletAddress, rpcUrl = 'https://api.mainnet-beta.solana.com' } = JSON.parse(functionArgs);
+                  const publicKey = new PublicKey(walletAddress);
+                  const scoringKit = new ScoringWalletKit(rpcUrl);
+
+                  await scoringKit.fetchTx(publicKey);
+                  const metrics = scoringKit.getMetrics();
+
+                  onChunk(`\nWallet Scoring Analysis: \n\n`);
+                  onChunk(`Transaction Frequency: ${ (metrics.frequency * 100).toFixed(1) }%\n`);
+                  onChunk(`Trading Volume: ${ (metrics.volume * 100).toFixed(1) }%\n`);
+                  onChunk(`Profitability: ${ (metrics.profitability * 100).toFixed(1) }%\n`);
+                  onChunk(`DEX Diversity: ${ (metrics.dexDiversity * 100).toFixed(1) }%\n`);
+                  onChunk(`Stablecoin Activity: ${ (metrics.stablecoinActivity * 100).toFixed(1) }%\n`);
+                  onChunk(`Risk Score: ${ (metrics.riskyContracts * 100).toFixed(1) }%\n`);
+                  onChunk(`\nOverall Score: ${ (metrics.finalScore * 100).toFixed(1) }%\n`);
+                } catch (error) {
+                  onChunk("\nFailed to analyze wallet scoring.\n");
+                }
+                break;
+
+              case 'getWalletHistory':
+                try {
+                  const { address, limit = 10 } = JSON.parse(functionArgs);
+                  const publicKey = new PublicKey(address);
+                  const kit = new ScoringWalletKit(process.env.NEXT_PUBLIC_RPC_URL!);
+                  await kit.fetchTx(publicKey, limit);
+
+                  onChunk(`\nTransaction History: \n\n`);
+                  onChunk(`Total Transactions: ${ kit.getTransactionCount() } \n`);
+                } catch (error) {
+                  onChunk("\nFailed to fetch wallet history.\n");
+                }
+                break;
+
+              case 'calculateWalletRisk':
+                try {
+                  const { address } = JSON.parse(functionArgs);
+                  const publicKey = new PublicKey(address);
+                  const kit = new ScoringWalletKit(process.env.NEXT_PUBLIC_RPC_URL!);
+                  
+                  await kit.fetchTx(publicKey);
+                  const riskScore = kit.calcRiskContract();
+                  const stableTokenVol = kit.calcStableTokenVol();
+
+                  onChunk(`\nRisk Analysis: \n`);
+                  onChunk(`Risk Score: ${ (riskScore * 100).toFixed(1) }%\n`);
+                  onChunk(`Stable Token Volume: $${ stableTokenVol.toFixed(2) } \n`);
+                } catch (error) {
+                  onChunk("\nFailed to calculate wallet risk.\n");
+                }
+                break;
+
+              case 'analyzeDexUsage':
+                try {
+                  const { address } = JSON.parse(functionArgs);
+                  const publicKey = new PublicKey(address);
+                  const kit = new ScoringWalletKit(process.env.NEXT_PUBLIC_RPC_URL!);
+                  
+                  await kit.fetchTx(publicKey);
+                  const diversity = kit.calcDexDiversity();
+                  const volume = kit.calcVol();
+
+                  onChunk(`\nDEX Usage Analysis: \n`);
+                  onChunk(`DEX Diversity Score: ${ (diversity * 100).toFixed(1) }%\n`);
+                  onChunk(`Trading Volume: ${ volume.toFixed(2) } SOL\n`);
+                } catch (error) {
+                  onChunk("\nFailed to analyze DEX usage.\n");
+                }
+                break;
+
+              case 'getDetailedTransactionHistory':
+                try {
+                  const { address, limit = 10 } = JSON.parse(functionArgs);
+                  const processor = new TransactionProcessor(process.env.NEXT_PUBLIC_RPC_URL!);
+                  const transactions = await processor.getTransactions(address, limit);
+
+                  onChunk(`\nTransaction History: \n\n`);
+                  transactions.forEach((tx, i) => {
+                    onChunk(`${ i + 1 }. ${ tx.signature } \n`);
+                    onChunk(`   Time: ${ new Date(tx.timestamp * 1000).toLocaleString() } \n`);
+                    onChunk(`   Status: ${ tx.success ? 'Success' : 'Failed' } \n`);
+                    if (tx.amount) onChunk(`   Amount: ${ tx.amount } SOL\n`);
+                    if (tx.tokenTransfers?.length) {
+                      onChunk(`   Token Transfers: ${
+  tx.tokenTransfers.map(t =>
+    `${t.amount} ${t.token.slice(0, 4)}...`).join(', ')
+} \n`);
+                    }
+                    onChunk(`   Fee: ${ tx.fee } SOL\n\n`);
+                  });
+                } catch (error) {
+                  onChunk("\nFailed to fetch transaction history.\n");
+                }
+                break;
+
+              case 'getWalletMetrics':
+                try {
+                  const { address } = JSON.parse(functionArgs);
+                  const processor = new TransactionProcessor(process.env.NEXT_PUBLIC_RPC_URL!);
+                  const metrics = await processor.getTransactionMetrics(address);
+
+                  onChunk(`\nWallet Metrics: \n\n`);
+                  onChunk(`Total Volume: ${ metrics.totalVolume.toFixed(4) } SOL\n`);
+                  onChunk(`Success Rate: ${ metrics.successRate.toFixed(1) }%\n`);
+                  onChunk(`Average Transaction: ${ metrics.averageAmount.toFixed(4) } SOL\n`);
+                  onChunk(`Unique Tokens: ${ metrics.uniqueTokens.length } \n`);
+                  onChunk(`Program Interactions: ${
+  Array.from(metrics.programInteractions.entries())
+  .map(([prog, count]) => `\n   ${prog.slice(0, 8)}... (${count} times)`)
+  .join('')
+} \n`);
+                } catch (error) {
+                  onChunk("\nFailed to calculate wallet metrics.\n");
+                }
+                break;
+
+              case 'handleTransaction':
+                try {
+                  const { connection, serializedTx, blockhash } = JSON.parse(functionArgs);
+                  const txResponse = await transactionSenderAndConfirmationWaiter({
+                    connection: new Connection(connection),
+                    serializedTransaction: Buffer.from(serializedTx),
+                    blockhashWithExpiryBlockHeight: blockhash
+                  });
+
+                  if (txResponse) {
+                    onChunk(`\nTransaction Confirmed: \n`);
+                    onChunk(`Signature: ${ txResponse.transaction.signatures[0] } \n`);
+                    onChunk(`Block: ${ txResponse.slot } \n`);
+                    onChunk(`Fee: ${ txResponse.meta?.fee } lamports\n`);
+                  } else {
+                    onChunk(`\nTransaction expired or failed.\n`);
+                  }
+                } catch (error) {
+                  onChunk(`\nTransaction failed: ${ error instanceof Error ? error.message : 'Unknown error occurred' } \n`);
+                }
+                break;
+
+              case 'validateAddress':
+                try {
+                  const { input, type } = JSON.parse(functionArgs);
+                  const isValid = type === 'address' 
+                    ? validateSolanaAddress(input)
+                    : validateTransactionHash(input);
+                    
+                  if (isValid) {
+                    const chainType = getChainType(input);
+                    onChunk(`\nValidation Result: Valid ${ chainType } ${ type } \n`);
+                    if (type === 'address') {
+                      onChunk(`Formatted: ${ formatAddress(input) } \n`);
+                    }
+                  } else {
+                    onChunk(`\nValidation Result: Invalid ${ type } \n`);
+                  }
+                } catch (error) {
+                  onChunk("\nValidation failed.\n");
+                }
+                break;
+
+              case 'validateTransaction':
+                try {
+                  const params = JSON.parse(functionArgs);
+                  const validation = validateTransactionParams(params);
+                  
+                  if (validation.isValid) {
+                    onChunk(`\nTransaction parameters are valid\n`);
+                    onChunk(`Sender: ${ formatAddress(params.sender) } \n`);
+                    onChunk(`Recipient: ${ formatAddress(params.recipient) } \n`);
+                    onChunk(`Amount: ${ params.amount } SOL\n`);
+                  } else {
+                    onChunk(`\nValidation Error: ${ validation.error } \n`);
+                  }
+                } catch (error) {
+                  onChunk("\nTransaction validation failed.\n");
+                }
+                break;
+
+              case 'initializeWallet':
+                try {
+                  const success = await agentWallet.initialize();
+                  onChunk(`\nWallet Initialization: ${ success ? 'Successful' : 'Failed' } \n`);
+                } catch (error) {
+                  onChunk("\nFailed to initialize wallet\n");
+                }
+                break;
+
+              case 'getWalletConnection':
+                try {
+                  const connection = await agentWallet.getActiveConnection();
+                  const slot = await connection.getSlot();
+                  onChunk(`\nConnection Status: \n`);
+                  onChunk(`Active: ${ !!connection } \n`);
+                  onChunk(`Current Slot: ${ slot } \n`);
+                  onChunk(`Using Fallback: ${ agentWallet['isUsingFallback'] } \n`);
+                } catch (error) {
+                  onChunk("\nFailed to get wallet connection status\n");
+                }
+                break;
+
+              case 'processWalletText':
+                try {
+                  const { text } = JSON.parse(functionArgs);
+                  const result = await agentWallet.processWalletText(text);
+                  onChunk(`\nText Analysis Result: \n`);
+                  onChunk(`Embedding: ${ JSON.stringify(result) } \n`);
+                } catch (error) {
+                  onChunk("\nFailed to process wallet text\n");
+                }
+                break;
+
+              case 'generateImage':
+                try {
+                  const { prompt, size = '1024x1024', n = 1 } = JSON.parse(functionArgs);
+                  
+                  const agent = new SolanaAgentKit(
+                    process.env.SOLANA_PRIVATE_KEY!,  // Provide the private key
+                    'https://api.mainnet-beta.solana.com', // Provide the RPC URL
+                    process.env.GROQ_API_KEY!// Provide the OpenAI API key, ensure it's a string
+                  );
+          
+                  const result = await create_image(agent, prompt, size, n);
+          
+                  onChunk(`\nImage Generation Results: \n`);
+                  result.images.forEach((image, i) => {
+                    onChunk(`Image ${ i + 1 }: ${ image } \n`);
+                  });
+                  onChunk(`\nMetadata: \n`);
+                  onChunk(`Model: ${ result.metadata?.model } \n`);
+                  onChunk(`Generation Time: ${ result.metadata?.inferenceTime } ms\n`);
+                } catch (error) {
+                  const parsedError = JSON.parse((error as Error).message);
+                  onChunk(`\nImage Generation Failed: \n`);
+                  onChunk(`Error Code: ${ parsedError.code } \n`);
+                  onChunk(`Message: ${ parsedError.message } \n`);
+                }
+                break;
+
+              case 'getTokenData':
+                try {
+                  const { input, byTicker = false } = JSON.parse(functionArgs);
+                  let tokenData;
+
+                  if (byTicker) {
+                    tokenData = await getTokenDataByTicker(input);
+                  } else {
+                    tokenData = await getTokenDataByAddress(new PublicKey(input));
+                  }
+
+                  if (tokenData) {
+                    onChunk(`\nToken Information: \n`);
+                    onChunk(`Name: ${ tokenData.name } \n`);
+                    onChunk(`Symbol: ${ tokenData.symbol } \n`);
+                    onChunk(`Address: ${ tokenData.address } \n`);
+                    onChunk(`Decimals: ${ tokenData.decimals } \n`);
+                    
+                    if (tokenData.extensions) {
+                      if (tokenData.extensions.coingeckoId) {
+                        onChunk(`CoinGecko: ${ tokenData.extensions.coingeckoId } \n`);
+                      }
+                      if (tokenData.extensions.website) {
+                        onChunk(`Website: ${ tokenData.extensions.website } \n`);
+                      }
+                      if (tokenData.extensions.twitter) {
+                        onChunk(`Twitter: ${ tokenData.extensions.twitter } \n`);
+                      }
+                    }
+                    
+                    if (tokenData.tags?.length) {
+                      onChunk(`Tags: ${ tokenData.tags.join(', ') } \n`);
+                    }
+                  } else {
+                    onChunk(`\nToken not found.\n`);
+                  }
+                } catch (error) {
+                  onChunk(`\nError fetching token data: ${ error instanceof Error ? error.message : 'Unknown error' } \n`);
+                }
+                break;
+
+              case 'getWalletAssets':
+                try {
+                  const { address, limit = 10 } = JSON.parse(functionArgs);
+                  const assets = await getAssetsByOwner(null, new PublicKey(address), limit);
+                  
+                  onChunk(`\nWallet Assets: \n\n`);
+                  assets.forEach((asset: any) => {
+                    onChunk(`Token: ${ asset.symbol } \n`);
+                    onChunk(`Mint: ${ asset.mint } \n`);
+                    onChunk(`Amount: ${ asset.amount / Math.pow(10, asset.decimals) } \n`);
+                    onChunk(`Decimals: ${ asset.decimals } \n\n`);
+                  });
+
+                  if (assets.length === 0) {
+                    onChunk(`No assets found for this wallet.\n`);
+                  }
+                } catch (error) {
+                  const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+                  onChunk(`\nFailed to fetch wallet assets: ${ errorMessage } \n`);
+                }
+                break;
+
+              case 'getRecentTxs':
+                try {
+                  const { address } = JSON.parse(functionArgs);
+                  const transactions = await getRecentTransactions(address);
+
+                  onChunk(`\nRecent Transactions: \n\n`);
+                  transactions.forEach(tx => {
+                    onChunk(`Type: ${ tx.type } \n`);
+                    onChunk(`Status: ${ tx.status } \n`);
+                    onChunk(`Time: ${ tx.timestamp } \n`);
+                    onChunk(`From: ${ tx.from } \n`);
+                    onChunk(`To: ${ tx.to } \n`);
+                    if (tx.amount) {
+                      onChunk(`Amount: ${ tx.amount } ${ tx.token } \n`);
+                    }
+                    onChunk(`Signature: ${ tx.signature } \n\n`);
+                  });
+
+                  if (transactions.length === 0) {
+                    onChunk(`No recent transactions found.\n`);
+                  }
+                } catch (error) {
+                  onChunk(`\nFailed to fetch transactions: ${ error instanceof Error ? error.message : 'Unknown error' } \n`);
+                }
+                break;
+
+              case 'parseTransaction':
+                try {
+                  const { transactionId } = JSON.parse(functionArgs);
+                  const agent = new SolanaAgentKit(
+                    process.env.SOLANA_PRIVATE_KEY!,  // Provide the private key
+                    'https://api.mainnet-beta.solana.com',
+                    process.env.GROQ_API_KEY! // Provide the RPC URL
+                  );
+                  const parsedData = await parseTransaction(agent, transactionId);
+                  
+                  onChunk(`\nParsed Transaction Data: \n\n`);
+                  onChunk(JSON.stringify(parsedData, null, 2));
+                } catch (error) {
+                  onChunk(`\nFailed to parse transaction: ${ error instanceof Error ? error.message : 'Unknown error' } \n`);
+                }
+                break;
+
+              case 'sendHighPriorityTransaction':
+                try {
+                  const { priorityLevel, amount, to, splmintAddress } = JSON.parse(functionArgs);
+                  const agent = new SolanaAgentKit(
+                    process.env.SOLANA_PRIVATE_KEY!,  // Provide the private key
+                    'https://api.mainnet-beta.solana.com' ,
+                    process.env.GROQ_API_KEY! // Provide the RPC URL
+                  );
+                  const recipient = new PublicKey(to);
+                  const transactionResult = await sendTransactionWithPriorityFee(agent, priorityLevel, amount, recipient, splmintAddress ? new PublicKey(splmintAddress) : undefined);
+                  
+                  onChunk(`\nTransaction Sent: \n\n`);
+                  onChunk(`Transaction ID: ${ transactionResult.transactionId } \n`);
+                  onChunk(`Priority Fee: ${ transactionResult.fee } microLamports\n`);
+                } catch (error) {
+                  onChunk(`\nFailed to send transaction: ${ error instanceof Error ? error.message : 'Unknown error' } \n`);
+                }
+                break;
+
+              case 'openbookCreateMarket':
+                const { baseMint, quoteMint, lotSize, tickSize } = JSON.parse(functionArgs);
+                result = await openbookCreateMarket(agent, new PublicKey(baseMint), new PublicKey(quoteMint), lotSize, tickSize);
+                onChunk(`\nMarket Created Successfully: \n\n`);
+                onChunk(`Transaction IDs: ${ result.join(', ') } \n`);
+                break;
+
+              case 'launchPumpFunToken':
+                const { name, symbol, initialSupply, decimals } = JSON.parse(functionArgs);
+                result = await launchPumpFunToken(agent, name, symbol, initialSupply, decimals);
+                onChunk(`\nPumpFun Token Launched Successfully: \n\n`);
+                onChunk(`Token Address: ${ result.mint } \n`);
+                onChunk(`Transaction ID: ${ result.signature } \n`);
+                break;
+
+              case 'swap':
+                const { outputMint, inputAmount, inputMint, inputDecimal } = JSON.parse(functionArgs);
+                result = await swapTool.invoke({ outputMint, inputAmount, inputMint, inputDecimal });
+                onChunk(`\nSwap Transaction Result: \n\n`);
+                onChunk(`Transaction ID: ${result} \n`);
                 break;
             }
           } catch (error) {
@@ -434,7 +1587,7 @@ export async function streamCompletion(
       
       // Handle rate limiting
       if (error?.status === 429) {
-        logger.warn(`Rate limited. Attempt ${retries} of ${RATE_LIMIT.MAX_RETRIES}`);
+        logger.warn(`Rate limited.Attempt ${ retries } of ${ RATE_LIMIT.MAX_RETRIES } `);
         if (retries < RATE_LIMIT.MAX_RETRIES) {
           await delay(RATE_LIMIT.RETRY_DELAY);
           continue;
@@ -463,7 +1616,7 @@ export async function streamCompletion(
   }
 }
 
-// Simpler completion without streaming
+// Non-streaming completion function
 export async function botCompletion(
   messages: Message[],
   providedApiKey?: string
@@ -550,6 +1703,7 @@ function getChainType(hash: string): 'ethereum' | 'solana' {
   return hash.startsWith('0x') && hash.length === 66 ? 'ethereum' : 'solana';
 }
 
+// Trade execution helper
 export async function executeTradeCommand(message: string, wallet: any) {
   const amount = parseFloat(message);
   if (isNaN(amount)) {

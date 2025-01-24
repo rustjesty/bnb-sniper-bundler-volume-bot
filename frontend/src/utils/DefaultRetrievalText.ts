@@ -14,4 +14,4 @@ When using context from documents:
 {context}
 
 Current conversation:
-{chat_history}` 
+{chat_history}`  
