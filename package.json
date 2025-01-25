@@ -54,7 +54,7 @@
     "buffer": "6.0.3",
     "bufferutil": "^4.0.9",
     "cors": "^2.8.5",
-    "decimal.js": "^10.4.2",
+    "decimal.js": "10.4.2",
     "discord.js": "^14.17.3",
     "dotenv": "^16.4.7",
     "ethers": "6.13.4",
