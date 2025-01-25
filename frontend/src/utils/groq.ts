@@ -2,6 +2,7 @@
 import { Groq } from 'groq-sdk';
 import { LAMPORTS_PER_SOL, PublicKey, Connection, Transaction } from '@solana/web3.js';
 import { SolanaAgentKit } from 'solana-agent-kit';
+import { BN } from 'bn.js';
 
 // Local utility imports
 import { getSolanaPrice, getTrendingSolanaTokens } from './coingecko';
@@ -37,6 +38,8 @@ import { openbookCreateMarket } from '@/tools/openbook/openbook_create_market';
 import { launchPumpFunToken } from '@/tools/pumpfun/launch_pumpfun_token';
 import { swapTool } from '@/tools/swap';
 import { CHAT_TEMPLATE, CONDENSE_QUESTION_TEMPLATE, QA_TEMPLATE, REPHRASE_TEMPLATE } from './RetrievalPrompts';
+import { AmmInfo, AmmMarket, AmmOps, AmmPool, ClmmDecrease, ClmmFarm, ClmmHarvest, ClmmIncrease, ClmmMarketMaker, ClmmNewPosition, ClmmPool, ClmmPoolInfo, ClmmRewards, FarmStake } from '@/app/api/raydium';
+
 
 // Constants
 const BALANCE_CACHE_DURATION = 10000; // 10 seconds
@@ -738,6 +741,161 @@ const functions = [
       },
       required: ['priorityLevel', 'amount', 'to']
     }
+  },
+  {
+    name: 'createAmmPool',
+    description: 'Create a new Raydium AMM pool',
+    parameters: {
+      type: 'object',
+      properties: {
+        baseMint: { type: 'string', description: 'Base token mint address' },
+        quoteMint: { type: 'string', description: 'Quote token mint address' },
+        baseAmount: { type: 'number', description: 'Initial base token amount' },
+        quoteAmount: { type: 'number', description: 'Initial quote token amount' }
+      },
+      required: ['baseMint', 'quoteMint', 'baseAmount', 'quoteAmount']
+    }
+  },
+  {
+    name: 'addLiquidity',
+    description: 'Add liquidity to Raydium AMM pool',
+    parameters: {
+      type: 'object',
+      properties: {
+        poolId: { type: 'string', description: 'Pool ID' },
+        baseAmount: { type: 'number', description: 'Base token amount' },
+        quoteAmount: { type: 'number', description: 'Quote token amount' }
+      },
+      required: ['poolId', 'baseAmount', 'quoteAmount']
+    }
+  },
+  {
+    name: 'createClmmPool',
+    description: 'Create a new Raydium CLMM pool',
+    parameters: {
+      type: 'object',
+      properties: {
+        mint1: { type: 'string', description: 'First token mint address' },
+        mint2: { type: 'string', description: 'Second token mint address' },
+        initialPrice: { type: 'number', description: 'Initial price' }
+      },
+      required: ['mint1', 'mint2', 'initialPrice']
+    }
+  },
+  {
+    name: 'manageFarmRewards',
+    description: 'Manage farming rewards for CLMM pool',
+    parameters: {
+      type: 'object',
+      properties: {
+        poolId: { type: 'string', description: 'Pool ID' },
+        rewardMint: { type: 'string', description: 'Reward token mint address' },
+        rewardRate: { type: 'number', description: 'Rewards per second' },
+        duration: { type: 'number', description: 'Duration in seconds' }
+      },
+      required: ['poolId', 'rewardMint', 'rewardRate']
+    }
+  },
+  {
+    name: 'harvestRewards',
+    description: 'Harvest farming rewards',
+    parameters: {
+      type: 'object',
+      properties: {
+        poolId: { type: 'string', description: 'Pool ID' },
+        positionId: { type: 'string', description: 'Position ID' }
+      },
+      required: ['poolId', 'positionId']
+    }
+  },
+  {
+    name: 'getRaydiumPoolInfo',
+    description: 'Get detailed information about a Raydium pool',
+    parameters: {
+      type: 'object',
+      properties: {
+        poolId: { type: 'string', description: 'Pool ID' },
+        poolType: { type: 'string', enum: ['AMM', 'CLMM', 'CPMM'], description: 'Pool type' }
+      },
+      required: ['poolId', 'poolType']
+    }
+  },
+  {
+    name: 'createMarket',
+    description: 'Create a new Openbook market for Raydium',
+    parameters: {
+      type: 'object',
+      properties: {
+        baseMint: { type: 'string' },
+        quoteMint: { type: 'string' },
+        lotSize: { type: 'number' },
+        tickSize: { type: 'number' }
+      },
+      required: ['baseMint', 'quoteMint', 'lotSize', 'tickSize']
+    }
+  },
+  {
+    name: 'createClmmPosition',
+    description: 'Create a new CLMM position',
+    parameters: {
+      type: 'object',
+      properties: {
+        poolId: { type: 'string' },
+        tickLower: { type: 'number' },
+        tickUpper: { type: 'number' },
+        amount: { type: 'number' }
+      },
+      required: ['poolId', 'tickLower', 'tickUpper', 'amount']
+    }
+  },
+  {
+    name: 'modifyClmmPosition',
+    description: 'Modify CLMM position liquidity',
+    parameters: {
+      type: 'object',
+      properties: {
+        positionId: { type: 'string' },
+        operation: { type: 'string', enum: ['increase', 'decrease'] },
+        amount: { type: 'number' }
+      },
+      required: ['positionId', 'operation', 'amount']
+    }
+  },
+  {
+    name: 'createFarm',
+    description: 'Create a new Raydium farm',
+    parameters: {
+      type: 'object',
+      properties: {
+        poolId: { type: 'string' },
+        rewardMints: { type: 'array', items: { type: 'string' } }
+      },
+      required: ['poolId', 'rewardMints']
+    }
+  },
+  {
+    name: 'stakeFarm',
+    description: 'Stake LP tokens in farm',
+    parameters: {
+      type: 'object',
+      properties: {
+        farmId: { type: 'string' },
+        amount: { type: 'number' }
+      },
+      required: ['farmId', 'amount']
+    }
+  },
+  {
+    name: 'fetchMarketMaker',
+    description: 'Get market maker info for CLMM pool',
+    parameters: {
+      type: 'object',
+      properties: {
+        poolId: { type: 'string' },
+        positionRange: { type: 'number' }
+      },
+      required: ['poolId']
+    }
   }
 ];
 
@@ -866,7 +1024,6 @@ export async function streamCompletion(
           try {
             let result;
             switch (functionName) {
-             
               case 'stakeWithJup':
                 const { amount } = JSON.parse(functionArgs);
                 result = await stakeWithJup(agent, amount);
@@ -1561,6 +1718,141 @@ export async function streamCompletion(
                 result = await swapTool.invoke({ outputMint, inputAmount, inputMint, inputDecimal });
                 onChunk(`\nSwap Transaction Result: \n\n`);
                 onChunk(`Transaction ID: ${result} \n`);
+                break;
+
+              case 'createAmmPool':
+                try {
+                  const { baseMint, quoteMint, baseAmount, quoteAmount } = JSON.parse(functionArgs);
+                  const result = await AmmPool.createAmmPool() as { poolId: string; txId: string };
+                  onChunk(`\nAMM Pool Created:\nPool ID: ${result.poolId}\nTransaction: ${result.txId}\n`);
+                } catch (error) {
+                  onChunk(`\nFailed to create AMM pool: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+                }
+                break;
+            
+              case 'addLiquidity': 
+                try {
+                  const { poolId, baseAmount, quoteAmount } = JSON.parse(functionArgs);
+                  const result = await AmmOps.addLiquidity() as { txId: string };
+                  onChunk(`\nLiquidity Added:\nTransaction: ${result.txId}\n`);
+                } catch (error) {
+                  onChunk(`\nFailed to add liquidity: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+                }
+                break;
+            
+              case 'createClmmPool':
+                try {
+                  const { mint1, mint2, initialPrice } = JSON.parse(functionArgs);
+                  const result = await ClmmPool.createPool() as { poolId: string; txId: string };
+                  onChunk(`\nCLMM Pool Created:\nPool ID: ${result.poolId}\nTransaction: ${result.txId}\n`);
+                } catch (error) {
+                  onChunk(`\nFailed to create CLMM pool: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+                }
+                break;
+            
+              case 'manageFarmRewards':
+                try {
+                  const { poolId, rewardMint, rewardRate, duration } = JSON.parse(functionArgs);
+                  await ClmmRewards.setFarmRewards();
+                  onChunk(`\nFarm Rewards Updated Successfully\n`);
+                } catch (error) {
+                  onChunk(`\nFailed to manage farm rewards: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+                }
+                break;
+            
+              case 'harvestRewards':
+                try {
+                  const { poolId, positionId } = JSON.parse(functionArgs);
+                  const result = await ClmmHarvest.harvestAllRewards();
+                  onChunk(`\nRewards Harvested:\nTransaction: ${result}\n`);
+                } catch (error) {
+                  onChunk(`\nFailed to harvest rewards: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+                }
+                break;
+            
+              case 'getRaydiumPoolInfo':
+                try {
+                  const { poolId, poolType } = JSON.parse(functionArgs);
+                  let info;
+                  switch (poolType) {
+                    case 'AMM':
+                      info = await AmmInfo.fetchRpcPoolInfo();
+                      break;
+                    case 'CLMM':
+                      info = await ClmmPoolInfo.fetchRpcPoolInfo();
+                      break;
+                    default:
+                      throw new Error('Unsupported pool type');
+                  }
+                  onChunk(`\nPool Information:\n${JSON.stringify(info, null, 2)}\n`);
+                } catch (error) {
+                  onChunk(`\nFailed to get pool info: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+                }
+                break;
+
+              case 'createMarket':
+                try {
+                  const { baseMint, quoteMint, lotSize, tickSize } = JSON.parse(functionArgs);
+                  const result = await AmmMarket.createMarket() as { marketId: string; txId: string };
+                  onChunk(`\nMarket Created:\nMarket ID: ${result.marketId}\nTransaction: ${result.txId}\n`);
+                } catch (error) {
+                  onChunk(`\nFailed to create market: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+                }
+                break;
+            
+              case 'createClmmPosition':
+                try {
+                  const { poolId, tickLower, tickUpper, amount } = JSON.parse(functionArgs);
+                  const result = await ClmmNewPosition.createPosition() as { positionId: string; txId: string };
+                  onChunk(`\nPosition Created:\nPosition ID: ${result.positionId}\nTransaction: ${result.txId}\n`);
+                } catch (error) {
+                  onChunk(`\nFailed to create position: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+                }
+                break;
+            
+              case 'modifyClmmPosition':
+                try {
+                  const { positionId, operation, amount } = JSON.parse(functionArgs);
+                  const result = operation === 'increase' 
+                    ? await ClmmIncrease.increaseLiquidity()
+                    : await ClmmDecrease.decreaseLiquidity();
+                  onChunk(`\nPosition Modified:\nTransaction: ${result}\n`);
+                } catch (error) {
+                  onChunk(`\nFailed to modify position: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+                }
+                break;
+            
+              case 'createFarm':
+                try {
+                  const { poolId, rewardMints } = JSON.parse(functionArgs);
+                  const result = await ClmmFarm.createFarm();
+                  onChunk(`\nFarm Created Successfully\n`);
+                } catch (error) {
+                  onChunk(`\nFailed to create farm: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+                }
+                break;
+            
+              case 'stakeFarm':
+                try {
+                  const { farmId, amount } = JSON.parse(functionArgs);
+                  const result = await FarmStake.stake() as { txId: string };
+                  onChunk(`\nStake Successful:\nTransaction: ${result.txId}\n`);
+                } catch (error) {
+                  onChunk(`\nFailed to stake: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+                }
+                break;
+            
+              case 'fetchMarketMaker':
+                try {
+                  const { poolId, positionRange } = JSON.parse(functionArgs);
+                  const result = await ClmmMarketMaker.getInfo({
+                    poolId: new PublicKey(poolId),
+                    positionRange
+                  });
+                  onChunk(`\nMarket Maker Info:\n${JSON.stringify(result, null, 2)}\n`);
+                } catch (error) {
+                  onChunk(`\nFailed to fetch market maker info: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+                }
                 break;
             }
           } catch (error) {

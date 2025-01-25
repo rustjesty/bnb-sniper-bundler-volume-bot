@@ -2,6 +2,7 @@ import { CLMM_PROGRAM_ID, DEVNET_PROGRAM_ID, TickUtils, Raydium } from '@raydium
 import { initSdk } from '../config'
 import cron from 'node-cron'
 import Decimal from 'decimal.js'
+import { PublicKey } from '@solana/web3.js'
 
 let raydium: Raydium | undefined
 const poolId = process.argv[2]
@@ -146,3 +147,42 @@ if (poolId) {
 } else {
   console.log('please provide pool id')
 }
+
+export class ClmmMarketMaker {
+  static async getInfo({ poolId, positionRange }: { poolId: PublicKey; positionRange: number }) {
+    if (!raydium) raydium = await initSdk();
+    const data = await raydium.clmm.getPoolInfoFromRpc(poolId.toBase58());
+    const allPosition = await raydium.clmm.getOwnerPositionInfo({ programId: CLMM_PROGRAM_ID });
+    const poolPositions = allPosition.filter((p) => p.poolId.toBase58() === poolId.toBase58());
+
+    const positionsInfo = poolPositions.map((position) => {
+      const priceLower = TickUtils.getTickPrice({
+        poolInfo: data.poolInfo,
+        tick: position.tickLower,
+        baseIn: true,
+      }).price;
+      const priceUpper = TickUtils.getTickPrice({
+        poolInfo: data.poolInfo,
+        tick: position.tickUpper,
+        baseIn: true,
+      }).price;
+
+      return {
+        positionId: position.nftMint.toBase58(),
+        priceLower: priceLower.toString(),
+        priceUpper: priceUpper.toString(),
+        liquidity: position.liquidity.toString(),
+      };
+    });
+
+    return {
+      poolId: poolId.toBase58(),
+      currentPrice: data.poolInfo.price,
+      positions: positionsInfo,
+    };
+  }
+}
+export function getInfo({ poolId, positionRange }: { poolId: PublicKey; positionRange: number }) {
+  return ClmmMarketMaker.getInfo({ poolId, positionRange });
+}
+
