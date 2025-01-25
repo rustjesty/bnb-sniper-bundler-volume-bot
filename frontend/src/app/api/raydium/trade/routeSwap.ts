@@ -25,7 +25,7 @@ const poolType: Record<number, string> = {
 
 setLoggerLevel('Raydium_tradeV2', LogLevel.Debug)
 
-async function routeSwap() {
+export async function routeSwap() {
   const raydium = await initSdk()
   await raydium.fetchChainTime()
 

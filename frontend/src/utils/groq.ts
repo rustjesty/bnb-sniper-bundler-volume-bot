@@ -2,7 +2,6 @@
 import { Groq } from 'groq-sdk';
 import { LAMPORTS_PER_SOL, PublicKey, Connection, Transaction } from '@solana/web3.js';
 import { SolanaAgentKit } from 'solana-agent-kit';
-import { BN } from 'bn.js';
 
 // Local utility imports
 import { getSolanaPrice, getTrendingSolanaTokens } from './coingecko';
@@ -895,6 +894,20 @@ const functions = [
         positionRange: { type: 'number' }
       },
       required: ['poolId']
+    }
+  },
+  {
+    name: 'executeSwap',
+    description: 'Execute token swap through chat',
+    parameters: {
+      type: 'object',
+      properties: {
+        fromToken: { type: 'string' },
+        toToken: { type: 'string' },
+        amount: { type: 'number' },
+        slippage: { type: 'number', default: 1 }
+      },
+      required: ['fromToken', 'toToken', 'amount']
     }
   }
 ];
@@ -1852,6 +1865,21 @@ export async function streamCompletion(
                   onChunk(`\nMarket Maker Info:\n${JSON.stringify(result, null, 2)}\n`);
                 } catch (error) {
                   onChunk(`\nFailed to fetch market maker info: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+                }
+                break;
+
+              case 'executeSwap':
+                try {
+                  const { fromToken, toToken, amount, slippage = 1 } = JSON.parse(functionArgs);
+                  const swapResult = await swapTool.invoke({
+                    outputMint: toToken,
+                    inputAmount: amount,
+                    inputMint: fromToken,
+                    inputDecimal: 9 
+                  });
+                  onChunk(`Swap executed: ${swapResult}\n`);
+                } catch (error) {
+                  onChunk(`Swap failed: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
                 }
                 break;
             }
