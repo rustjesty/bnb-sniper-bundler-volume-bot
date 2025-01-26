@@ -1,100 +1,112 @@
 import { CpmmPoolInfoLayout, splAccountLayout } from "@raydium-io/raydium-sdk-v2";
 import { TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID } from "@solana/spl-token";
-import Client from "@triton-one/yellowstone-grpc";
-import base58 from "bs58";
+import { Connection, PublicKey } from "@solana/web3.js";
 import Decimal from "decimal.js";
-import { grpcToken, grpcUrl } from "../config";
 
-async function cpmmPoolInfo() {
-  const programId = 'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C'
-  const auth = 'GpMZbSM2GgvTKHJirzeGfMFoaZ8UR2X7F4v8vHTvxFbL'
+export class CpmmPoolMonitor {
+  private connection: Connection;
+  private vaultToPoolId: { [key: string]: { poolId: string, type: 'base' | 'quote' } } = {};
+  private poolInfoCache: {
+    [key: string]: {
+      poolInfo: ReturnType<typeof CpmmPoolInfoLayout.decode>,
+      vaultA: ReturnType<typeof splAccountLayout.decode> | undefined,
+      vaultB: ReturnType<typeof splAccountLayout.decode> | undefined
+    }
+  } = {};
 
-  const client = new Client(grpcUrl, grpcToken, undefined);
-  const rpcConnInfo = await client.subscribe();
+  constructor(endpoint: string) {
+    this.connection = new Connection(endpoint);
+  }
 
-  rpcConnInfo.on("data", (data) => {
-    callback(data, programId)
-  });
+  async startMonitoring(onUpdate?: (poolId: string, vaultA: Decimal, vaultB: Decimal, price: Decimal) => void) {
+    const PROGRAM_ID = 'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C';
+    const AUTH = 'GpMZbSM2GgvTKHJirzeGfMFoaZ8UR2X7F4v8vHTvxFbL';
 
-  await new Promise<void>((resolve, reject) => {
-    if (rpcConnInfo === undefined) throw Error('rpc conn error')
-    rpcConnInfo.write({
-      slots: {},
-      accounts: {
-        ammUpdate: {
-          owner: [programId],
-          account: [],
-          filters: [{ datasize: `${CpmmPoolInfoLayout.span}` }],
-          nonemptyTxnSignature: true,
-        },
-        vaultUpdate: {
-          owner: [TOKEN_PROGRAM_ID.toString()],
-          account: [],
-          filters: [{ memcmp: { offset: `${splAccountLayout.offsetOf('owner')}`, base58: auth } }],
-          nonemptyTxnSignature: true,
-        },
-        vault2022Update: {
-          owner: [TOKEN_2022_PROGRAM_ID.toString()],
-          account: [],
-          filters: [{ memcmp: { offset: `${splAccountLayout.offsetOf('owner')}`, base58: auth } }],
-          nonemptyTxnSignature: true,
-        },
-      },
-      transactions: {},
-      transactionsStatus: {},
-      blocks: {},
-      blocksMeta: {},
-      accountsDataSlice: [],
-      entry: {},
-      commitment: 1
-    }, (err: Error) => {
-      if (err === null || err === undefined) {
-        resolve();
-      } else {
-        reject(err);
-      }
-    });
-  }).catch((reason) => {
-    console.error(reason);
-    throw reason;
-  });
-}
+    const subscriptionIds = [
+      this.connection.onProgramAccountChange(
+        new PublicKey(PROGRAM_ID),
+        async (update) => this.handleAmmUpdate(update, onUpdate),
+        {
+          filters: [{
+            dataSize: CpmmPoolInfoLayout.span
+          }]
+        }
+      ),
 
-const vaultToPoolId: { [key: string]: { poolId: string, type: 'base' | 'quote' } } = {}
-const poolInfoCache: { [key: string]: { poolInfo: ReturnType<typeof CpmmPoolInfoLayout.decode>, vaultA: ReturnType<typeof splAccountLayout.decode> | undefined, vaultB: ReturnType<typeof splAccountLayout.decode> | undefined } } = {}
+      this.connection.onProgramAccountChange(
+        TOKEN_PROGRAM_ID,
+        async (update) => this.handleVaultUpdate(update, AUTH, onUpdate),
+        {
+          filters: [{
+            memcmp: {
+              offset: splAccountLayout.offsetOf('owner'),
+              bytes: new PublicKey(AUTH).toBase58()
+            }
+          }]
+        }
+      ),
 
-async function callback(_data: any, programId: string) {
-  if (_data.filters.includes('ammUpdate')) {
-    const data = _data.account
+      this.connection.onProgramAccountChange(
+        TOKEN_2022_PROGRAM_ID,
+        async (update) => this.handleVaultUpdate(update, AUTH, onUpdate),
+        {
+          filters: [{
+            memcmp: {
+              offset: splAccountLayout.offsetOf('owner'),
+              bytes: new PublicKey(AUTH).toBase58()
+            }
+          }]
+        }
+      )
+    ];
 
-    const formatData = CpmmPoolInfoLayout.decode(data.account.data)
-    const pk = base58.encode(data.account.pubkey)
+    return () => {
+      subscriptionIds.forEach(id => this.connection.removeAccountChangeListener(id));
+    };
+  }
 
-    poolInfoCache[pk] = { poolInfo: formatData, vaultA: undefined, vaultB: undefined }
-    vaultToPoolId[formatData.vaultA.toString()] = { poolId: pk, type: 'base' }
-    vaultToPoolId[formatData.vaultB.toString()] = { poolId: pk, type: 'quote' }
-  } else if (_data.filters.includes('vaultUpdate') || _data.filters.includes('vault2022Update')) {
-    const data = _data.account
+  private handleAmmUpdate(update: any, onUpdate?: (poolId: string, vaultA: Decimal, vaultB: Decimal, price: Decimal) => void): void {
+    const formatData = CpmmPoolInfoLayout.decode(update.accountInfo.data);
+    const pk = update.accountId.toBase58();
 
-    const formatData = splAccountLayout.decode(data.account.data)
-    const pk = base58.encode(data.account.pubkey)
+    this.poolInfoCache[pk] = { poolInfo: formatData, vaultA: undefined, vaultB: undefined };
+    this.vaultToPoolId[formatData.vaultA.toString()] = { poolId: pk, type: 'base' };
+    this.vaultToPoolId[formatData.vaultB.toString()] = { poolId: pk, type: 'quote' };
+  }
 
-    if (vaultToPoolId[pk] === undefined) return
+  private handleVaultUpdate(update: any, auth: string, onUpdate?: (poolId: string, vaultA: Decimal, vaultB: Decimal, price: Decimal) => void): void {
+    const formatData = splAccountLayout.decode(update.accountInfo.data);
+    if (formatData.owner.toString() !== auth) return;
 
-    const _poolType = vaultToPoolId[pk]
+    const pk = update.accountId.toBase58();
+    if (!this.vaultToPoolId[pk]) return;
 
-    if (_poolType.type === 'base') {
-      poolInfoCache[_poolType.poolId].vaultA = formatData
+    const poolType = this.vaultToPoolId[pk];
+    const poolCache = this.poolInfoCache[poolType.poolId];
+    if (!poolCache) return;
+
+    if (poolType.type === 'base') {
+      poolCache.vaultA = formatData;
     } else {
-      poolInfoCache[_poolType.poolId].vaultB = formatData
+      poolCache.vaultB = formatData;
     }
 
-    if (poolInfoCache[_poolType.poolId].vaultA === undefined || poolInfoCache[_poolType.poolId].vaultB === undefined) return
+    if (!poolCache.vaultA || !poolCache.vaultB) return;
 
-    const vaultA = new Decimal(poolInfoCache[_poolType.poolId].vaultA!.amount.sub(poolInfoCache[_poolType.poolId].poolInfo.fundFeesMintA).sub(poolInfoCache[_poolType.poolId].poolInfo.protocolFeesMintA).toString()).div(10 ** poolInfoCache[_poolType.poolId].poolInfo.mintDecimalA)
-    const vaultB = new Decimal(poolInfoCache[_poolType.poolId].vaultB!.amount.sub(poolInfoCache[_poolType.poolId].poolInfo.fundFeesMintB).sub(poolInfoCache[_poolType.poolId].poolInfo.protocolFeesMintB).toString()).div(10 ** poolInfoCache[_poolType.poolId].poolInfo.mintDecimalB)
-    console.log(_poolType.poolId, vaultA, vaultB, vaultB.div(vaultA))
+    const vaultA = new Decimal(poolCache.vaultA.amount
+      .sub(poolCache.poolInfo.fundFeesMintA)
+      .sub(poolCache.poolInfo.protocolFeesMintA).toString())
+      .div(10 ** poolCache.poolInfo.mintDecimalA);
+
+    const vaultB = new Decimal(poolCache.vaultB.amount
+      .sub(poolCache.poolInfo.fundFeesMintB)
+      .sub(poolCache.poolInfo.protocolFeesMintB).toString())
+      .div(10 ** poolCache.poolInfo.mintDecimalB);
+
+    const price = vaultB.div(vaultA);
+
+    if (onUpdate) {
+      onUpdate(poolType.poolId, vaultA, vaultB, price);
+    }
   }
 }
-
-cpmmPoolInfo()

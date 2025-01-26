@@ -1,5 +1,6 @@
 import { Groq } from 'groq-sdk';
-import { elizaLogger } from "@ai16z/eliza";
+import logger from './logger';
+
 
 interface DocumentChunk {
   content: string;
@@ -50,7 +51,7 @@ export async function processDocuments(
     // Limit number of chunks
     return filteredResults.slice(0, maxChunks);
   } catch (error) {
-    elizaLogger.error('Error processing documents:', error);
+    logger.error('Error processing documents:', error);
     throw error;
   }
 }
@@ -80,7 +81,7 @@ export function formatRetrievalResults(
 
     return formattedText;
   } catch (error) {
-    elizaLogger.error('Error formatting retrieval results:', error);
+    logger.error('Error formatting retrieval results:', error);
     return 'Error formatting context';
   }
 }
@@ -105,7 +106,7 @@ export async function generateEmbedding(
     // Note: Implementation depends on how Groq returns embeddings
     return embedding.split(',').map(Number);
   } catch (error) {
-    elizaLogger.error('Error generating embedding:', error);
+    logger.error('Error generating embedding:', error);
     throw error;
   }
 }
@@ -135,7 +136,7 @@ export function calculateSimilarity(
 
     return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2));
   } catch (error) {
-    elizaLogger.error('Error calculating similarity:', error);
+    logger.error('Error calculating similarity:', error);
     return 0;
   }
 }

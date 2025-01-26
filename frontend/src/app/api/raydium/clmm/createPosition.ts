@@ -1,8 +1,7 @@
 import { ApiV3PoolInfoConcentratedItem, TickUtils, PoolUtils, ClmmKeys } from '@raydium-io/raydium-sdk-v2'
 import BN from 'bn.js'
 import { initSdk, txVersion } from '../config'
-// Replace Decimal import
-const Decimal = require('decimal.js')
+import Decimal from 'decimal.js'
 import { isValidClmm } from './utils'
 
 export const createPosition = async () => {
@@ -34,13 +33,13 @@ export const createPosition = async () => {
 
   const { tick: lowerTick } = TickUtils.getPriceAndTick({
     poolInfo,
-    price: new Decimal(startPrice),
+    price: new Decimal(startPrice) as any, // Type assertion to ensure compatibility
     baseIn: true,
   })
 
   const { tick: upperTick } = TickUtils.getPriceAndTick({
     poolInfo,
-    price: new Decimal(endPrice),
+    price: new Decimal(endPrice) as any, // Type assertion to ensure compatibility
     baseIn: true,
   })
 

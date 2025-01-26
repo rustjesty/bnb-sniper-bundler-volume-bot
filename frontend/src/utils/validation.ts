@@ -1,6 +1,5 @@
-import { PublicKey } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 import logger from './logger';
-
 
 export type ChainType = 'solana' | 'ethereum' | 'invalid';
 
@@ -16,6 +15,13 @@ export const validateSolanaAddress = (address: string): boolean => {
   } catch (error) {
     return false;
   }
+};
+
+/**
+ * Validates an Ethereum address
+ */
+export const validateEthereumAddress = (address: string): boolean => {
+  return /^0x[a-fA-F0-9]{40}$/.test(address);
 };
 
 /**
@@ -43,7 +49,7 @@ export const getChainType = (address: string): ChainType => {
     if (!address) return 'invalid';
 
     // Check for Ethereum address
-    if (address.startsWith('0x') && /^0x[a-fA-F0-9]{40}$/.test(address)) {
+    if (validateEthereumAddress(address)) {
       return 'ethereum';
     }
 
@@ -175,8 +181,91 @@ export const isTokenMint = (address: string): boolean => {
   }
 };
 
+export class TransactionValidator {
+  private static readonly MAX_FEE_THRESHOLD = 0.1; // SOL
+  private static readonly MIN_CONFIRMATIONS = 1;
+  private static readonly CONFIRMATION_TIMEOUT = 60000; // ms
+
+  constructor(private connection: Connection) {}
+
+  async validateTransaction(
+    transaction: Transaction | VersionedTransaction,
+    params?: {
+      sender?: string;
+      recipient?: string;
+      amount?: number;
+    }
+  ): Promise<ValidationResult> {
+    try {
+      if (params) {
+        const paramValidation = validateTransactionParams(params);
+        if (!paramValidation.isValid) {
+          return { isValid: false, error: paramValidation.error };
+        }
+      }
+
+      const fee = await this.connection.getFeeForMessage(
+        'version' in transaction ? transaction.message : transaction.compileMessage(),
+        'confirmed'
+      );
+
+      if (!fee || fee.value === null || fee.value / 1e9 > TransactionValidator.MAX_FEE_THRESHOLD) {
+        return { isValid: false, error: 'Transaction fee too high' };
+      }
+
+      return { isValid: true };
+    } catch (error) {
+      logger.error('Transaction validation error:', error);
+      return { 
+        isValid: false, 
+        error: error instanceof Error ? error.message : 'Unknown validation error' 
+      };
+    }
+  }
+
+  async monitorTransaction(signature: string): Promise<MonitoringResult> {
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < TransactionValidator.CONFIRMATION_TIMEOUT) {
+      try {
+        const status = await this.connection.getSignatureStatus(signature);
+        
+        if (!status.value) continue;
+
+        if (status.value.err) {
+          return { 
+            confirmed: false, 
+            error: 'Transaction failed', 
+            confirmations: status.value.confirmations ?? undefined
+          };
+        }
+
+        if (status.value.confirmationStatus === 'finalized' || 
+            (status.value.confirmations ?? 0) >= TransactionValidator.MIN_CONFIRMATIONS) {
+          return { 
+            confirmed: true, 
+            confirmations: status.value.confirmations ?? undefined
+          };
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (error) {
+        logger.error('Transaction monitoring error:', error);
+      }
+    }
+
+    return { confirmed: false, error: 'Confirmation timeout' };
+  }
+}
+
 // Export types for use in other modules
 export type ValidationResult = {
   isValid: boolean;
   error?: string;
+};
+
+export type MonitoringResult = {
+  confirmed: boolean;
+  error?: string;
+  confirmations?: number;
 };

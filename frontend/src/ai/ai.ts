@@ -13,9 +13,10 @@ import { agentWallet } from '@/utils/wallet';
 import { getAssetsByOwner } from '@/tools/helius/get_assets_by_owner';
 import { requestDevnetAirdrop } from '@/utils/airdrop';
 import { PublicKey, VersionedTransaction } from '@solana/web3.js';
-import { fetchPrice } from '@/tools/jupiter/fetch_price';
+//import { fetchPrice } from '@/tools/jupiter/fetch_price';
 import type { Portfolio } from '@/types/portfolio';
 import Groq from "groq-sdk";
+import { fetchPrice } from "solana-agent-kit/dist/tools/fetch_price";
 
 
 interface AIServiceConfig {

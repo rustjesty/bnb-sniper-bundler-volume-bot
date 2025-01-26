@@ -1,57 +1,42 @@
 import { PoolInfoLayout, SqrtPriceMath } from '@raydium-io/raydium-sdk-v2';
-import Client from "@triton-one/yellowstone-grpc";
-import base58 from "bs58";
-import { grpcToken, grpcUrl } from "../config";
+import { Connection, PublicKey } from '@solana/web3.js';
 
-async function clmmPoolInfo() {
-  const programId = 'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK'
+const PROGRAM_ID = 'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK';
 
-  const client = new Client(grpcUrl, grpcToken, undefined);
-  const rpcConnInfo = await client.subscribe();
+export class ClmmPoolMonitorV2 {
+  private connection: Connection;
 
-  rpcConnInfo.on("data", (data) => {
-    callback(data, programId)
-  });
+  constructor(endpoint: string) {
+    this.connection = new Connection(endpoint);
+  }
 
-  await new Promise<void>((resolve, reject) => {
-    if (rpcConnInfo === undefined) throw Error('rpc conn error')
-    rpcConnInfo.write({
-      slots: {},
-      accounts: {
-        ammUpdate: {
-          owner: [programId],
-          account: [],
-          filters: [{ datasize: `${PoolInfoLayout.span}` }],
-          nonemptyTxnSignature: true,
-        },
+  async watchPoolUpdates(callback: (poolAddress: string, price: number) => void) {
+    const programId = new PublicKey(PROGRAM_ID);
+
+    const wsId = this.connection.onProgramAccountChange(
+      programId,
+      (accountInfo) => {
+        try {
+          if (accountInfo.accountInfo.data.length !== PoolInfoLayout.span) return;
+          
+          const data = PoolInfoLayout.decode(accountInfo.accountInfo.data);
+          const poolAddress = accountInfo.accountId.toBase58();
+          const price = SqrtPriceMath.sqrtPriceX64ToPrice(
+            data.sqrtPriceX64,
+            data.mintDecimalsA,
+            data.mintDecimalsB
+          );
+
+          callback(poolAddress, price.toNumber());
+        } catch (e) {
+          console.error('Error processing pool update:', e);
+        }
       },
-      transactions: {},
-      transactionsStatus: {},
-      blocks: {},
-      blocksMeta: {},
-      accountsDataSlice: [],
-      entry: {},
-      commitment: 1
-    }, (err: Error) => {
-      if (err === null || err === undefined) {
-        resolve();
-      } else {
-        reject(err);
-      }
-    });
-  }).catch((reason) => {
-    console.error(reason);
-    throw reason;
-  });
+      'confirmed'
+    );
+
+    return () => {
+      this.connection.removeAccountChangeListener(wsId);
+    };
+  }
 }
-
-async function callback(_data: any, programId: string) {
-  const data = _data.account
-
-  const formatData = PoolInfoLayout.decode(data.account.data)
-  const pk = base58.encode(data.account.pubkey)
-
-  console.log(pk, SqrtPriceMath.sqrtPriceX64ToPrice(formatData.sqrtPriceX64, formatData.mintDecimalsA, formatData.mintDecimalsB))
-}
-
-clmmPoolInfo()

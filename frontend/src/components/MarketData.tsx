@@ -9,18 +9,18 @@ import {
   getTokenDataByTicker,
 } from '@/tools/dexscreener/token_data_ticker';
 import { getTokenAddressFromTicker } from '@/tools/dexscreener/get_token_data';
-import { fetchPrice } from '@/tools/jupiter/fetch_price';
+
 import { getSolanaPrice } from '@/utils/coingecko';
 import { SolanaAgentKit } from 'solana-agent-kit';
 import logger from '@/utils/logger';
 import type { MarketDataProps } from '@/types/market';
-import { raydiumCreateAmmV4 } from '@/tools/raydium/raydium_create_ammV4'; 
-import { raydiumCreateCpmm } from '@/tools/raydium/raydium_create_cpmm';
-import { raydiumCreateClmm } from '@/tools/raydium/raydium_create_clmm';
+
 import { openbookCreateMarket } from '@/tools/openbook/openbook_create_market'; 
 import BN from 'bn.js';
 import Decimal from 'decimal.js';
 import axios from 'axios';
+import { fetchPrice } from 'solana-agent-kit/dist/tools/fetch_price';
+import { AmmInfo, AmmMarket, AmmOps, AmmPool, ClmmDecrease, ClmmFarm, ClmmHarvest, ClmmIncrease, ClmmMarketMaker, ClmmNewPosition, ClmmPool, ClmmPoolInfo, ClmmRewards, FarmStake } from '@/app/api/raydium';
 
 // Types
 interface TokenPrice {
@@ -93,7 +93,7 @@ const MarketData: React.FC<MarketDataProps> = ({
       const quoteAmount = new BN(1); // Example values
       const startTime = new BN(Date.now() / 1000); // Example values
 
-      await raydiumCreateAmmV4(agent, marketId, baseAmount, quoteAmount, startTime);
+      await AmmPool.createAmmPool();
 
       // Fetch account information using raydiumCreateCpmm
       const mintA = new PublicKey(JENNA_TOKEN_ADDRESS);
@@ -103,14 +103,14 @@ const MarketData: React.FC<MarketDataProps> = ({
       const mintBAmount = new BN(1); // Example values
       const startTimeCpmm = new BN(Date.now() / 1000); // Example values
 
-      await raydiumCreateCpmm(agent, mintA, mintB, configId, mintAAmount, mintBAmount, startTimeCpmm);
+      await AmmMarket.createMarket();
 
       // Fetch account information using raydiumCreateClmm
       const mint1 = new PublicKey(JENNA_TOKEN_ADDRESS);
       const initialPrice = new Decimal(123.45); // Example value
       const startTimeClmm = new BN(Date.now() / 1000); // Example values
 
-      await raydiumCreateClmm(agent, mint1, mintA, configId, initialPrice, startTimeClmm);
+      await ClmmPool.createPool();
 
       // Fetch account information using openbookCreateMarket
       const baseMint = new PublicKey(JENNA_TOKEN_ADDRESS);
@@ -229,6 +229,33 @@ const MarketData: React.FC<MarketDataProps> = ({
       await fetchPoolInfo(mintAddress);
     } catch (error) {
       logger.error('Error fetching pool info:', error);
+    }
+  };
+
+  const handleIncreaseLiquidity = async (positionId: string, amount0: number, amount1: number) => {
+    try {
+      await ClmmIncrease.increaseLiquidity();
+    } catch (error) {
+      logger.error('Failed to increase liquidity:', error);
+      throw error;
+    }
+  };
+
+  const handleDecreaseLiquidity = async (positionId: string, liquidity: number) => {
+    try {
+      await ClmmDecrease.decreaseLiquidity();
+    } catch (error) {
+      logger.error('Failed to decrease liquidity:', error);
+      throw error;
+    }
+  };
+
+  const handleHarvestRewards = async (farmId: string) => {
+    try {
+      await ClmmHarvest.harvestAllRewards();
+    } catch (error) {
+      logger.error('Failed to harvest rewards:', error);
+      throw error;
     }
   };
 

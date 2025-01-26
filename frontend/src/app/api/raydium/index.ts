@@ -2,7 +2,7 @@
 import * as AmmOps from './amm/addLiquidity'
 import * as AmmPool from './amm/createAmmPool'
 import * as AmmMarket from './amm/createMarket'
-import * as AmmInfo from './amm/fetchRpcPoolInfo'
+import * as AmmInfo from './amm/fetchRpcPoolInfo'    
 import * as AmmSwap from './amm/swap'
 import * as AmmSwapBase from './amm/swapBaseOut'
 import * as AmmWithdraw from './amm/withdrawLiquidity'

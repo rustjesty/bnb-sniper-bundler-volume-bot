@@ -33,12 +33,12 @@ export async function formatSwapInfo(txid: string) {
       const transferAmount2 = transfer2.parsed.info.amount ?? transfer2.parsed.info.tokenAmount.amount
 
       if (type === 'ammV4') {
-        // @ts-ignore
+        // @ts-expect-error accounts array type is not properly inferred from transaction data
         const swapType = itemIns.accounts[4].toString() === transferSource1 ? 'A to B' : 'B to A'
 
         console.log({
           type,
-          // @ts-ignore
+          // @ts-expect-error accounts array type is not properly inferred from transaction data
           poolId: itemIns.accounts[1].toString(),
 
           inputAmount: swapType === 'A to B' ? transferAmount1 : transferAmount2,
@@ -47,7 +47,7 @@ export async function formatSwapInfo(txid: string) {
       } else {
         console.log({
           type,
-          // @ts-ignore
+          // @ts-expect-error accounts array type is not properly inferred from transaction data
           poolId: itemIns.accounts[type === 'clmm' ? 2 : 3].toString(),
 
           inputAmount: transferAmount1,
@@ -72,12 +72,11 @@ export async function formatSwapInfo(txid: string) {
         const transferAmount2 = transfer2.parsed.info.amount ?? transfer2.parsed.info.tokenAmount.amount
 
         if (innerType === 'ammV4') {
-          // @ts-ignore
           const swapType = innerItemIns.accounts[4].toString() === transferSource1 ? 'A to B' : 'B to A'
 
           console.log({
             type: innerType,
-            // @ts-ignore
+           
             poolId: innerItemIns.accounts[1].toString(),
 
             inputAmount: swapType === 'A to B' ? transferAmount1 : transferAmount2,
@@ -86,7 +85,7 @@ export async function formatSwapInfo(txid: string) {
         } else {
           console.log({
             type: innerType,
-            // @ts-ignore
+            
             poolId: innerItemIns.accounts[innerType === 'clmm' ? 2 : 3].toString(),
 
             inputAmount: transferAmount1,

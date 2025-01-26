@@ -89,7 +89,7 @@ export class RaydiumPriceService {
     pools: any[]
   ): Promise<TokenPriceInfo> {
     const prices: number[] = [];
-    let totalVolume = new Decimal(0);
+    const totalVolume = new Decimal(0);
     let totalLiquidity = new Decimal(0);
 
     for (const pool of pools) {

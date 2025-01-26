@@ -115,15 +115,19 @@ export default function SwapInterface({
   };
 
   const findBestRoute = async () => {
-    if (!await validateTokenPair()) return;
+    const isValid = await validateTokenPair();
+    if (!isValid) return;
 
     setStatus('loading');
     try {
-      const routes = await routeSwap() as unknown as Route[];
-
-      if (routes && routes.length > 0) {
-        setRoute(routes[0]); // Best route
-        setPriceImpact(routes[0].priceImpact);
+      const result = await routeSwap();
+      const routes = result === undefined ? [] : result;
+      const routeArray = Array.isArray(routes) ? routes : [];
+      
+      if (routeArray.length > 0) {
+        const bestRoute = routeArray[0] as Route;
+        setRoute(bestRoute);
+        setPriceImpact(bestRoute.priceImpact);
       }
     } catch (error) {
       logger.error('Route finding error:', error);
@@ -167,18 +171,19 @@ export default function SwapInterface({
       }
 
       const fee = await estimateGasFees(route);
-      const tx = poolType === 'AMM' 
-        ? await AmmSwap.swap() // Use the AmmSwap function for AMM pool
-        : await swap();
-         await ClmmSwap.swap() // Use the swap function for other swaps
-
-      await trackTransaction(tx, 'swap');
       
-      setStatus('success');
-      setInputAmount('');
-      setOutputAmount('');
-      setSwapError(null);
+      const tx = poolType === 'AMM' 
+        ? await AmmSwap.swap()
+        : await swap();
 
+      if (tx) {
+        await trackTransaction(tx, 'swap');
+        
+        setStatus('success');
+        setInputAmount('');
+        setOutputAmount('');
+        setSwapError(null);
+      }
     } catch (error) {
       handleSwapError(error);
     }
@@ -296,10 +301,16 @@ export default function SwapInterface({
     setStatus('error');
   };
 
-  const usePriceData = (inputToken: Token, outputToken: Token) => {
+  const usePriceData = (inputToken: Token | null, outputToken: Token | null) => {
+    const [prices, setPrices] = useState<PriceData[]>([]);
+  
     useEffect(() => {
       const fetchPriceHistory = async () => {
-        if (!inputToken || !outputToken) return;
+        if (!inputToken || !outputToken) {
+          setPrices([]);
+          return;
+        }
+  
         const history: PriceData[] = Array.from({length: 24}, (_, i) => ({
           timestamp: Date.now() - i * 3600000,
           price: Math.random() * 100,
@@ -307,18 +318,19 @@ export default function SwapInterface({
           marketCap: Math.random() * 10000000
         }));
         
-        setPriceHistory(history);
-        
-        setPriceHistory(history);
+        setPrices(history);
       };
-
+  
       fetchPriceHistory();
       const interval = setInterval(fetchPriceHistory, 15000);
       return () => clearInterval(interval);
     }, [inputToken, outputToken]);
-
-    return priceHistory;
+  
+    return prices;
   };
+  
+  // Replace the conditional hook call with direct usage
+  const prices = usePriceData(inputToken, outputToken);
 
   const fetchPoolInfo = async () => {
     try {
@@ -419,8 +431,6 @@ export default function SwapInterface({
   const PriceChart = () => {
     if (!inputToken || !outputToken) return null; // Add null checks
 
-    const prices = usePriceData(inputToken, outputToken);
-    
     return (
       <div className="h-48 mt-4">
         <Chart

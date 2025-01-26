@@ -20,7 +20,7 @@ export const owner: Keypair = Keypair.fromSecretKey(new Uint8Array(privateKeyArr
 export const connection = new Connection(rpcUrl)
 export const txVersion = TxVersion.V0 // or TxVersion.LEGACY
 const cluster = 'mainnet' // 'mainnet' | 'devnet'
- 
+
 let raydium: Raydium | undefined
 export const initSdk = async (params?: { loadToken?: boolean }) => {
   if (raydium) return raydium
@@ -70,6 +70,3 @@ export const fetchTokenAccountData = async () => {
   })
   return tokenAccountData
 }
-
-export const grpcUrl = '<YOUR_GRPC_URL>'
-export const grpcToken = '<YOUR_GRPC_TOKEN>'

@@ -1,4 +1,4 @@
-import { Connection, VersionedTransaction, PublicKey } from '@solana/web3.js';
+import { Connection, VersionedTransaction, PublicKey, Transaction } from '@solana/web3.js';
 import logger from './logger';
 
 // Types
@@ -337,3 +337,129 @@ export class AgentWallet {
 
 // Export singleton instance
 export const agentWallet = new AgentWallet();
+
+// TransactionValidator class
+export interface TransactionValidationConfig {
+  maxFee: number;
+  minConfirmations: number;
+  timeout: number;
+}
+
+export class TransactionValidator {
+  private static readonly DEFAULT_CONFIG: TransactionValidationConfig = {
+    maxFee: 0.1, // SOL
+    minConfirmations: 1,
+    timeout: 60000 // ms
+  };
+
+  static async validateTransaction(
+    transaction: Transaction | VersionedTransaction,
+    connection: Connection,
+    config: Partial<TransactionValidationConfig> = {}
+  ): Promise<{ isValid: boolean; reason?: string }> {
+    const finalConfig = { ...this.DEFAULT_CONFIG, ...config };
+
+    try {
+      // Check fee
+      const fee = await connection.getFeeForMessage(
+        'version' in transaction ? transaction.message : transaction.compileMessage(),
+        'confirmed'
+      );
+
+      if (!fee.value) {
+        return { isValid: false, reason: 'Unable to estimate fee' };
+      }
+
+      if (fee.value / 1e9 > finalConfig.maxFee) {
+        return { isValid: false, reason: 'Transaction fee too high' };
+      }
+
+      // Additional validation logic here
+      return { isValid: true };
+    } catch (error) {
+      logger.error('Transaction validation error:', error);
+      return { isValid: false, reason: error instanceof Error ? error.message : 'Unknown error' };
+    }
+  }
+
+  static async monitorTransaction(
+    signature: string,
+    connection: Connection,
+    config: Partial<TransactionValidationConfig> = {}
+  ): Promise<boolean> {
+    const finalConfig = { ...this.DEFAULT_CONFIG, ...config };
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < finalConfig.timeout) {
+      try {
+        const status = await connection.getSignatureStatus(signature);
+        
+        if (status.value?.confirmationStatus === 'finalized' || 
+            (status.value?.confirmations ?? 0) >= finalConfig.minConfirmations) {
+          return true;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } catch (error) {
+        logger.error('Transaction monitoring error:', error);
+      }
+    }
+
+    return false;
+  }
+}
+
+// ConnectionMonitor class
+export class ConnectionMonitor {
+  private static readonly LATENCY_THRESHOLD = 1000; // ms
+  private static readonly ERROR_THRESHOLD = 3;
+
+  private errorCount = 0;
+  private lastLatency = 0;
+
+  constructor(private connection: Connection) {}
+
+  async checkHealth(): Promise<{
+    isHealthy: boolean;
+    latency: number;
+    errorCount: number;
+  }> {
+    try {
+      const start = performance.now();
+      await this.connection.getSlot();
+      this.lastLatency = performance.now() - start;
+      
+      const isHealthy = this.lastLatency < ConnectionMonitor.LATENCY_THRESHOLD;
+      
+      if (!isHealthy) {
+        this.errorCount++;
+      } else {
+        this.errorCount = Math.max(0, this.errorCount - 1);
+      }
+
+      return {
+        isHealthy,
+        latency: this.lastLatency,
+        errorCount: this.errorCount
+      };
+    } catch (error) {
+      this.errorCount++;
+      logger.error('Connection health check error:', error);
+      
+      return {
+        isHealthy: false,
+        latency: this.lastLatency,
+        errorCount: this.errorCount
+      };
+    }
+  }
+
+  shouldSwitchEndpoint(): boolean {
+    return this.errorCount >= ConnectionMonitor.ERROR_THRESHOLD;
+  }
+
+  reset(): void {
+    this.errorCount = 0;
+    this.lastLatency = 0;
+  }
+}

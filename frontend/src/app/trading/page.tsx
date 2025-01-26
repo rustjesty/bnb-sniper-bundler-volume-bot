@@ -124,8 +124,9 @@ export default function TradingPage() {
             tokens={tokens}
             onSwap={handleSwap}
             loading={loading}
-            error={error}
-          />
+            error={error} visible={false} onClose={function (): void {
+              throw new Error('Function not implemented.');
+            } }          />
           <MarketData 
             token={selectedToken}
             metric="price"

@@ -7,7 +7,7 @@ import path from 'path'
 const filePath = path.join(__dirname, '../data/pool_data.json')
 
 export const readCachePoolData = (cacheTime?: number) => {
-  let cacheData: { time: number; ammPools: BasicPoolInfo[]; clmmPools: BasicPoolInfo[]; cpmmPools: BasicPoolInfo[] } = {
+  const cacheData: { time: number; ammPools: BasicPoolInfo[]; clmmPools: BasicPoolInfo[]; cpmmPools: BasicPoolInfo[] } = {
     time: 0,
     ammPools: [],
     clmmPools: [],

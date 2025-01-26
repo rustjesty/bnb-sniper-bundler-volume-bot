@@ -171,8 +171,9 @@ export default function Trading() {
         tokens={tokens}
         onSwap={handleSwap}
         loading={state.loading}
-        error={state.error}
-      />
+        error={state.error} visible={false} onClose={function (): void {
+          throw new Error('Function not implemented.');
+        } }      />
 
       {recentTrades.length > 0 && (
         <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">

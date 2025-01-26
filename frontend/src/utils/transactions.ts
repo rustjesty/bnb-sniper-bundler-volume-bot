@@ -1,6 +1,8 @@
-import { Connection, PublicKey, ParsedTransactionWithMeta, ParsedMessage, ParsedMessageAccount } from '@solana/web3.js';
-import { elizaLogger } from "@ai16z/eliza";
+import { Connection, PublicKey, ParsedTransactionWithMeta, ParsedMessage, ParsedMessageAccount, VersionedTransaction, Transaction } from '@solana/web3.js';
+
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { TransactionValidator, ValidationResult } from './validation';
+import logger from './logger';
 
 // Constants for transaction analysis
 const MAX_TRANSACTIONS = 1000;
@@ -83,7 +85,7 @@ export class TransactionProcessor {
             transactions.push(details);
           }
         } catch (error) {
-          elizaLogger.error(`Error processing transaction ${sig.signature}:`, error);
+          logger.error(`Error processing transaction ${sig.signature}:`, error);
           continue;
         }
       }
@@ -93,7 +95,7 @@ export class TransactionProcessor {
 
       return transactions;
     } catch (error) {
-      elizaLogger.error('Error fetching transactions:', error);
+      logger.error('Error fetching transactions:', error);
       throw new Error('Failed to fetch transactions');
     }
   }
@@ -191,7 +193,7 @@ export class TransactionProcessor {
 
       return details;
     } catch (error) {
-      elizaLogger.error('Error processing transaction:', error);
+      logger.error('Error processing transaction:', error);
       return null;
     }
   }
@@ -246,6 +248,21 @@ export class TransactionProcessor {
     } else {
       this.cache.clear();
     }
+  }
+
+  /**
+   * Validate a transaction
+   */
+  async validateTransaction(
+    transaction: Transaction | VersionedTransaction,
+    params?: {
+      sender?: string;
+      recipient?: string;
+      amount?: number;
+    }
+  ): Promise<ValidationResult> {
+    const validator = new TransactionValidator(this.connection);
+    return validator.validateTransaction(transaction, params);
   }
 }
 
