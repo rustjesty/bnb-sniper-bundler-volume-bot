@@ -3,7 +3,7 @@ import { PublicKey } from '@solana/web3.js'
 import { initSdk, txVersion } from '../config'
 
 export const createAmmFarm = async () => {
-  const raydium = await initSdk()
+  const raydium = await initSdk() 
   // RAY-USDC pool
   // note: please ensure you this is owned by yourself
   const poolInfo = (

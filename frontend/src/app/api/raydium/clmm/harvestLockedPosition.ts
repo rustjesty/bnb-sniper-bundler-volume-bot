@@ -13,7 +13,7 @@ import { initSdk, txVersion } from '../config'
 import { BN } from 'bn.js'
 
 export const harvestLockedPosition = async () => {
-  const raydium = await initSdk({ loadToken: true })
+  const raydium = await initSdk()
 
   const lockNftMint = new PublicKey('your locked position nft mint')
   const lockPositionId = getPdaLockClPositionIdV2(CLMM_LOCK_PROGRAM_ID, lockNftMint).publicKey

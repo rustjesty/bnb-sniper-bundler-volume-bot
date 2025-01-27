@@ -5,7 +5,7 @@ import { Decimal as Dec } from 'decimal.js'
 import BN from 'bn.js'
 
 export const createPool = async () => {
-  const raydium = await initSdk({ loadToken: true })
+  const raydium = await initSdk()
 
   // you can call sdk api to get mint info or paste mint info from api: https://api-v3.raydium.io/mint/list
   // RAY

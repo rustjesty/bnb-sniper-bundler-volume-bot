@@ -8,7 +8,7 @@ import {
   USDCMint,
   PoolKeys,
   getATAAddress,
-  swapBaseInAutoAccount,
+  swapBaseInAutoAccount, 
   ALL_PROGRAM_ID,
   printSimulate,
   addComputeBudget,
