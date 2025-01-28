@@ -31,9 +31,26 @@ import * as ClmmSwapBase from './clmm/swapBaseOut'
 // Core
 export * from './core/accounts'
 export * from './core/constants'
-export * from './core/errors'
-export * from './core/state'
+
+// Configuration
+export * from './core/config'
+export * from './core/middleware'
+
+// Public Interfaces & Types
 export * from './core/types'
+export * from './core/state'
+export * from './core/errors'
+
+// Trading & Routes
+export * from './trade/routeSwap'
+export * from './trade/swapBaseInInstruction'
+export * from './trade/swapBaseOutInstruction'
+
+// Services & Utilities
+export * from './services/price'
+export * from './services/quote'
+export * from './services/routes'
+export * from './other/formatSwapInfo'
 
 // Farm
 import * as FarmCreate from './farm/createAmmFarm'
@@ -48,20 +65,9 @@ import * as GrpcClmmPool from './grpc/clmmPoolInfo'
 import * as GrpcCpmmPool from './grpc/cpmmPoolInfo'
 import * as GrpcSub from './grpc/subNewAmmPool'
 
-// Other
-export * from './other/formatSwapInfo'
-
-// Services
-export * from './services/price'
-export * from './services/quote'
-export * from './services/routes'
-
-// Trade
-export * from './trade/routeSwap'
-export * from './trade/swapBaseInInstruction'
-export * from './trade/swapBaseOutInstruction'
-
+// Operation Modules
 export {
+  // AMM Operations
   AmmOps,
   AmmPool,
   AmmMarket,
@@ -69,8 +75,12 @@ export {
   AmmSwap,
   AmmSwapBase,
   AmmWithdraw,
+
+  // API Operations
   ApiSwap,
   ApiSwapBase,
+
+  // CLMM Operations
   ClmmPosition,
   ClmmFarm,
   ClmmPool,
@@ -86,11 +96,15 @@ export {
   ClmmRewards,
   ClmmSwap,
   ClmmSwapBase,
+
+  // Farm Operations
   FarmCreate,
   FarmEdit,
   FarmHarvest,
   FarmStake,
   FarmUnstake,
+
+  // GRPC Services
   GrpcAmmPool,
   GrpcClmmPool,
   GrpcCpmmPool,

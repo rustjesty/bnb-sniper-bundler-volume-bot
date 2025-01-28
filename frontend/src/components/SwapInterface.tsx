@@ -15,7 +15,7 @@ import {
 } from '@/tools/raydium';
 import { useConnection } from '@solana/wallet-adapter-react';
 import Chart from '@/components/Chart';
-import { raydiumService } from '@/tools/raydium/service';
+import { raydiumClient } from '@/tools/raydium/client';
 
 
 
@@ -104,9 +104,26 @@ export default function SwapInterface({
   const [priceImpactLevel, setPriceImpactLevel] = useState<string>('');
   const { connection } = useConnection();
   const [swapError, setSwapError] = useState<string | null>(null);
+  const [initialized, setInitialized] = useState(false);
 
   const priceService = createPriceService(connection);
   const quoteService = createQuoteService(connection);
+
+  useEffect(() => {
+    const init = async () => {
+      try {
+        await raydiumClient.initialize();
+        setInitialized(true);
+      } catch (error) {
+        console.error('Client initialization error:', error);
+      }
+    };
+    init();
+  }, []);
+
+  if (!initialized) {
+    return <div>Initializing...</div>;
+  }
 
   const validateTokenPair = async () => {
     if (!inputToken || !outputToken) {

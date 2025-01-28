@@ -1,5 +1,6 @@
 import { Connection, VersionedTransaction, PublicKey, Transaction } from '@solana/web3.js';
 import logger from './logger';
+import { parsePrivateKey } from './keys';
 
 // Types
 interface WalletBalance {

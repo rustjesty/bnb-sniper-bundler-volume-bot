@@ -1,4 +1,4 @@
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, Commitment, ConnectionConfig } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
 
 export interface RaydiumPoolInfo {
@@ -59,7 +59,41 @@ export interface PoolConfig {
   fundFeeRate: number;
 }
 
-export interface RaydiumError extends Error {
+export interface RaydiumErrorJSON {
+  name: string;
+  message: string;
   code: string;
   details?: any;
+}
+
+export enum RaydiumErrorCode {
+  INITIALIZATION_FAILED = "INITIALIZATION_FAILED",
+  CONNECTION_ERROR = "CONNECTION_ERROR",
+  INVALID_PARAMETERS = "INVALID_PARAMETERS"
+}
+
+export interface RaydiumError {
+  name: string;
+  message: string;
+  code: RaydiumErrorCode;
+  details?: any;
+  toJSON(): RaydiumErrorJSON;
+}
+
+export interface RaydiumConfig {
+  rpcUrl: string;
+  cluster: 'mainnet-beta' | 'devnet';
+  commitment: Commitment;
+  timeout?: number;
+}
+
+export interface ConnectionOptions extends ConnectionConfig {
+  commitment: Commitment;
+  confirmTransactionInitialTimeout: number;
+  wsEndpoint?: string;
+}
+
+export interface ServiceConfig extends RaydiumConfig {
+  maxRetries?: number;
+  retryDelay?: number;
 }

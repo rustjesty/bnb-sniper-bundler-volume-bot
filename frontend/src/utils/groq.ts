@@ -38,6 +38,8 @@ import { launchPumpFunToken } from '@/tools/pumpfun/launch_pumpfun_token';
 import { swapTool } from '@/tools/swap';
 import { CHAT_TEMPLATE, CONDENSE_QUESTION_TEMPLATE, QA_TEMPLATE, REPHRASE_TEMPLATE } from './RetrievalPrompts';
 import { AmmInfo, AmmMarket, AmmOps, AmmPool, ClmmDecrease, ClmmFarm, ClmmHarvest, ClmmIncrease, ClmmMarketMaker, ClmmNewPosition, ClmmPool, ClmmPoolInfo, ClmmRewards, FarmStake } from '@/tools/raydium';
+import { geckoTerminalAPI } from '@/tools/geckoterminal';
+import { MarketDataHelper } from '@/tools/geckoterminal/marketData';
 
 
 // Constants
@@ -908,6 +910,88 @@ const functions = [
         slippage: { type: 'number', default: 1 }
       },
       required: ['fromToken', 'toToken', 'amount']
+    }
+  },
+  {
+    name: 'getGeckoTokenInfo',
+    description: 'Get detailed token information from GeckoTerminal',
+    parameters: {
+      type: 'object',
+      properties: {
+        tokenAddress: {
+          type: 'string',
+          description: 'Token contract address'
+        }
+      },
+      required: ['tokenAddress']
+    }
+  },
+  {
+    name: 'getGeckoTokenPools',
+    description: 'Get liquidity pools for a token from GeckoTerminal',
+    parameters: {
+      type: 'object',
+      properties: {
+        tokenAddress: {
+          type: 'string',
+          description: 'Token contract address'
+        },
+        limit: {
+          type: 'number',
+          description: 'Number of pools to return',
+          default: 5
+        }
+      },
+      required: ['tokenAddress']
+    }
+  },
+  {
+    name: 'getGeckoTokenPriceHistory',
+    description: 'Get token price history from GeckoTerminal',
+    parameters: {
+      type: 'object',
+      properties: {
+        tokenAddress: {
+          type: 'string',
+          description: 'Token contract address'
+        },
+        timeframe: {
+          type: 'string',
+          enum: ['1h', '4h', '12h', '1d'],
+          default: '1d',
+          description: 'Timeframe for price data'
+        }
+      },
+      required: ['tokenAddress']
+    }
+  },
+  {
+    name: 'getGeckoTrendingTokens',
+    description: 'Get trending tokens from GeckoTerminal',
+    parameters: {
+      type: 'object',
+      properties: {
+        limit: {
+          type: 'number',
+          description: 'Number of trending tokens to return',
+          default: 10
+        }
+      },
+      required: []
+    }
+  },
+  {
+    name: 'analyzeGeckoToken',
+    description: 'Get comprehensive token analysis from GeckoTerminal',
+    parameters: {
+      type: 'object',
+      properties: {
+        tokenAddress: {
+          type: 'string',
+          description: 'Token contract address'
+        }
+      },
+      required: ['tokenAddress']
     }
   }
 ];
@@ -1882,6 +1966,14 @@ export async function streamCompletion(
                   onChunk(`Swap failed: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
                 }
                 break;
+
+              case 'getGeckoTokenInfo':
+              case 'getGeckoTokenPools':
+              case 'getGeckoTokenPriceHistory':
+              case 'getGeckoTrendingTokens':
+              case 'analyzeGeckoToken':
+                await handleGeckoTerminalFunctions(functionName, functionArgs, onChunk);
+                break;
             }
           } catch (error) {
             console.error('Function execution error:', error);
@@ -2041,6 +2133,34 @@ export async function executeTradeCommand(message: string, wallet: any) {
     );
   }
   return null;
+}
+
+async function handleGeckoTerminalFunctions(functionName: string, functionArgs: string, onChunk: (chunk: string) => void) {
+  try {
+    const args = JSON.parse(functionArgs);
+
+    switch (functionName) {
+      case 'getGeckoTokenInfo':
+        const tokenInfo = await geckoTerminalAPI.getTokenData(args.tokenAddress);
+        if (tokenInfo) {
+          onChunk('\nToken Information:\n\n');
+          onChunk(`Name: ${tokenInfo.name}\n`);
+          onChunk(`Symbol: ${tokenInfo.symbol}\n`);
+          onChunk(`Price: $${tokenInfo.price_usd.toFixed(6)}\n`);
+          onChunk(`24h Volume: $${tokenInfo.volume_24h.toLocaleString()}\n`);
+          onChunk(`24h Change: ${tokenInfo.price_change_24h.toFixed(2)}%\n`);
+          onChunk(`Market Cap: $${tokenInfo.market_cap.toLocaleString()}\n`);
+        } else {
+          onChunk('\nToken information not found.\n');
+        }
+        break;
+
+      // ...add other gecko terminal cases...
+    }
+  } catch (error) {
+    logger.error('GeckoTerminal function error:', error);
+    onChunk('\nAn error occurred while processing GeckoTerminal data.\n');
+  }
 }
 
 export type { Message };
