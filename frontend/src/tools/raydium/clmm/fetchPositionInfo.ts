@@ -17,18 +17,20 @@ import { initSdk } from '../config'
 
 export const fetchPositionInfo = async () => {
   const raydium = await initSdk()
-  const positionNftMint = new PublicKey('GQxt6TExLLZDQmrS3K4tmDn48yGhiWziVc1nQNmPcb5u')
+  
+  // Comment out or remove the direct position fetch
+  // const positionNftMint = new PublicKey('GQxt6TExLLZDQmrS3K4tmDn48yGhiWziVc1nQNmPcb5u')
+  // const positionPubKey = getPdaPersonalPositionAddress(CLMM_PROGRAM_ID, positionNftMint).publicKey
+  // const pos = await raydium.connection.getAccountInfo(positionPubKey)
+  // if (!pos) {
+  //   throw new Error('Position account not found')
+  // }
+  // const position = PositionInfoLayout.decode(pos.data)
 
-  // devnet:  DEVNET_PROGRAM_ID.CLMM
-  const positionPubKey = getPdaPersonalPositionAddress(CLMM_PROGRAM_ID, positionNftMint).publicKey
-  const pos = await raydium.connection.getAccountInfo(positionPubKey)
-  const position = PositionInfoLayout.decode(pos!.data)
-
-  // code below: get all clmm position in wallet
-  // devnet:  DEVNET_PROGRAM_ID.CLMM
-  // const allPosition = await raydium.clmm.getOwnerPositionInfo({ programId: CLMM_PROGRAM_ID }) // devnet:  DEVNET_PROGRAM_ID.CLMM
-  // if (!allPosition.length) throw new Error('use do not have position')
-  // const position = allPosition[0]
+  // Use this method instead to get all positions
+  const allPosition = await raydium.clmm.getOwnerPositionInfo({ programId: CLMM_PROGRAM_ID })
+  if (!allPosition.length) throw new Error('user does not have any positions')
+  const position = allPosition[0]
 
   let poolInfo: ApiV3PoolInfoConcentratedItem
 

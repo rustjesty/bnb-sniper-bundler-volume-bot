@@ -2,9 +2,10 @@
 import { Inter } from 'next/font/google';
 import './globals.css';
 import ClientLayout from '../components/ClientLayout';
+import '../lib/polyfills'; // Import polyfills
 
 const inter = Inter({ subsets: ['latin'] });
- 
+
 export const metadata = {
   title: 'JENNA AI Trading Assistant',
   description: 'AI-powered Solana trading assistant and market analyzer',

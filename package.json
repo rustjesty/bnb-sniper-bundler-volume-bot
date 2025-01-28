@@ -6,7 +6,8 @@
     "build": "npx tsc && npx rollup -c",
     "start": "node dist/index.js",
     "dev": "npx tsc && npx rollup -c -w",
-    "rebuild": "npm rebuild"
+    "rebuild": "npm rebuild",
+    "generate-keys": "ts-node scripts/generate-keys.ts"
   },
   "keywords": [],
   "author": "",

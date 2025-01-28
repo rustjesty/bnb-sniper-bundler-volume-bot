@@ -23,10 +23,7 @@ interface ConnectionConfig {
   fallback: RPCConfig | null;
 }
 
-let tokenizersPromise: Promise<typeof import('@anush008/tokenizers')> | undefined;
-if (typeof window === 'undefined') {
-  tokenizersPromise = import('@anush008/tokenizers');
-}
+
 
 export class AgentWallet {
   private primaryConnection: Connection | null = null;
@@ -211,7 +208,6 @@ export class AgentWallet {
         throw new Error('Invalid amount');
       }
 
-      const connection = await this.getActiveConnection();
       const response = await fetch(`${this.baseUrl}/api/wallet/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -236,7 +232,6 @@ export class AgentWallet {
 
   public async signAndSendTransaction(transaction: VersionedTransaction): Promise<string> {
     try {
-      const connection = await this.getActiveConnection();
       const serializedTransaction = Buffer.from(transaction.serialize()).toString('base64');
       
       const response = await fetch(`${this.baseUrl}/api/wallet/sign`, {
@@ -304,12 +299,6 @@ export class AgentWallet {
     }
   }
 
-  private async getTokenizers() {
-    if (typeof window !== 'undefined') {
-      throw new Error('Tokenizers module is not available on the client side');
-    }
-    return tokenizersPromise;
-  }
 
   // Validation helpers
   private isValidPublicKey(address: string): boolean {

@@ -37,7 +37,7 @@ import { openbookCreateMarket } from '@/tools/openbook/openbook_create_market';
 import { launchPumpFunToken } from '@/tools/pumpfun/launch_pumpfun_token';
 import { swapTool } from '@/tools/swap';
 import { CHAT_TEMPLATE, CONDENSE_QUESTION_TEMPLATE, QA_TEMPLATE, REPHRASE_TEMPLATE } from './RetrievalPrompts';
-import { AmmInfo, AmmMarket, AmmOps, AmmPool, ClmmDecrease, ClmmFarm, ClmmHarvest, ClmmIncrease, ClmmMarketMaker, ClmmNewPosition, ClmmPool, ClmmPoolInfo, ClmmRewards, FarmStake } from '@/app/api/raydium';
+import { AmmInfo, AmmMarket, AmmOps, AmmPool, ClmmDecrease, ClmmFarm, ClmmHarvest, ClmmIncrease, ClmmMarketMaker, ClmmNewPosition, ClmmPool, ClmmPoolInfo, ClmmRewards, FarmStake } from '@/tools/raydium';
 
 
 // Constants
@@ -1736,7 +1736,7 @@ export async function streamCompletion(
               case 'createAmmPool':
                 try {
                   const { baseMint, quoteMint, baseAmount, quoteAmount } = JSON.parse(functionArgs);
-                  const result = await AmmPool.createAmmPool() as { poolId: string; txId: string };
+                  const result = await AmmPool.createAmmPool() as unknown as { poolId: string; txId: string };
                   onChunk(`\nAMM Pool Created:\nPool ID: ${result.poolId}\nTransaction: ${result.txId}\n`);
                 } catch (error) {
                   onChunk(`\nFailed to create AMM pool: ${error instanceof Error ? error.message : 'Unknown error'}\n`);

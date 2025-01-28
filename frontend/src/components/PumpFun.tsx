@@ -1,7 +1,8 @@
 //PumpFun.tsx
 import { useState, useEffect } from 'react';
 import { PublicKey } from '@solana/web3.js';
-import { elizaLogger } from "@ai16z/eliza";
+import logger from '@/utils/logger';
+
 
 interface TokenMetrics {
   price: number;
@@ -88,7 +89,7 @@ export default function PumpFun({ walletAddress, onTransaction, onError }: PumpF
 
       setUserBalance(balance);
     } catch (error) {
-      elizaLogger.error('Error loading balance:', error);
+      logger.error('Error loading balance:', error);
     }
   };
 

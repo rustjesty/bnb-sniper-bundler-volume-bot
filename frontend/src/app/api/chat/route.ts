@@ -60,6 +60,11 @@ function isRateLimited(ip: string): boolean {
   return false;
 }
 
+function isBase58(str: string): boolean {
+  const base58Regex = /^[1-9A-HJ-NP-Za-km-z]+$/;
+  return base58Regex.test(str);
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Get client IP for rate limiting
@@ -81,6 +86,13 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'API key required' },
         { status: 401 }
+      );
+    }
+
+    if (!isBase58(apiKey)) {
+      return NextResponse.json(
+        { error: 'Invalid API key format' },
+        { status: 400 }
       );
     }
 
@@ -144,6 +156,13 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           { error: 'Rate limit exceeded on Groq API' },
           { status: 429 }
+        );
+      }
+
+      if (error.message.includes('Non-base58 character')) {
+        return NextResponse.json(
+          { error: 'Invalid API key format' },
+          { status: 400 }
         );
       }
     }

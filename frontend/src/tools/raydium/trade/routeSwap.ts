@@ -13,7 +13,7 @@ import {
 import { PublicKey } from '@solana/web3.js'
 import { NATIVE_MINT, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token'
 import { initSdk, txVersion } from '../config'
-import { readCachePoolData, writeCachePoolData } from '../cache/utils'
+import { readCachePoolData, writeCachePoolData, PoolMemoryCache } from '../cache/utils'
 import { printSimulateInfo } from '../util'
 
 const poolType: Record<number, string> = {
@@ -36,21 +36,15 @@ export async function routeSwap() {
 
   // strongly recommend cache all pool data, it will reduce lots of data fetching time
   // code below is a simple way to cache it, you can implement it with any other ways
-  // let poolData = readCachePoolData() // initial cache time is 10 mins(1000 * 60 * 10), if wants to cache longer, set bigger number in milliseconds
-  let poolData = readCachePoolData(1000 * 60 * 60 * 24 * 10) // example for cache 1 day
+  const cacheKey = 'poolData'
+  let poolData = PoolMemoryCache.getInstance().readCachePoolData(1000 * 60 * 60 * 24 * 10) // cache for 10 days
   if (poolData.ammPools.length === 0) {
     console.log(
       '**Please ensure you are using "paid" rpc node or you might encounter fetch data error due to pretty large pool data**'
     )
     console.log('fetching all pool basic info, this might take a while (more than 1 minutes)..')
     poolData = await raydium.tradeV2.fetchRoutePoolBasicInfo()
-    // devent pool info
-    // fetchRoutePoolBasicInfo({
-    //   amm: DEVNET_PROGRAM_ID.AmmV4,
-    //   clmm: DEVNET_PROGRAM_ID.CLMM,
-    //   cpmm: DEVNET_PROGRAM_ID.CREATE_CPMM_POOL_PROGRAM,
-    // })
-    writeCachePoolData(poolData)
+    PoolMemoryCache.getInstance().writeCachePoolData(poolData)
   }
 
   console.log('computing swap route..')
