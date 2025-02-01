@@ -1,5 +1,7 @@
 // src/app/api/raydium/operations/route.ts
-import { getServerSideRaydium } from '@/tools/raydium/server-config';
+//import { getServerSideRaydium } from '@/tools/raydium/server-config';
+
+import { getServerSideRaydium } from "../serverConfig";
 
 export async function POST(req: Request) {
   try {

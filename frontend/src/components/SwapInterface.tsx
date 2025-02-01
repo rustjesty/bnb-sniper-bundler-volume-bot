@@ -121,10 +121,6 @@ export default function SwapInterface({
     init();
   }, []);
 
-  if (!initialized) {
-    return <div>Initializing...</div>;
-  }
-
   const validateTokenPair = async () => {
     if (!inputToken || !outputToken) {
       logger.error('Invalid token pair');
@@ -348,7 +344,6 @@ export default function SwapInterface({
     return prices;
   };
   
-  // Replace the conditional hook call with direct usage
   const prices = usePriceData(inputToken, outputToken);
 
   const fetchPoolInfo = async () => {
@@ -375,6 +370,10 @@ export default function SwapInterface({
   useEffect(() => {
     fetchPoolInfo();
   }, []);
+
+  if (!initialized) {
+    return <div>Initializing...</div>;
+  }
 
   if (!visible) return null;
 

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { serverConnection } from './connection';
 import { RaydiumErrorCode } from './types';
+import { validateEnv } from '@/lib/envValidator';
 
 // Rate limiting configuration
 const RATE_LIMIT = {
@@ -33,19 +34,14 @@ class MiddlewareError extends Error {
 }
 
 async function validateRequest(request: NextRequest) {
-  // Check environment configuration
-  if (!process.env.SOLANA_PRIVATE_KEY) {
+  // Validate environment configuration
+  try {
+    validateEnv();
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     throw new MiddlewareError(
-      'Server configuration error: Missing private key',
+      'Server configuration error: ' + errorMessage,
       RaydiumErrorCode.INITIALIZATION_FAILED,
-      500
-    );
-  }
-
-  if (!process.env.NEXT_PUBLIC_RPC_URL) {
-    throw new MiddlewareError(
-      'Server configuration error: Missing RPC URL',
-      RaydiumErrorCode.CONNECTION_ERROR,
       500
     );
   }

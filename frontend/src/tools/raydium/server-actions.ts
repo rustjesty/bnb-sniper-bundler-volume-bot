@@ -1,6 +1,6 @@
 'use server';
 
-import { getServerSideRaydium } from './server-config';
+//import { getServerSideRaydium } from './server-config';
 import { operations, Operation } from './operations';
 
 export type OperationResult<T = any> = {
@@ -9,7 +9,7 @@ export type OperationResult<T = any> = {
   error?: string;
 };
 
-export async function performRaydiumOperation(
+export async function performRaydiumOperation( 
   operationPath: string, 
   params?: Record<string, any>
 ): Promise<OperationResult> {
@@ -37,3 +37,7 @@ export async function performRaydiumOperation(
     };
   }
 }
+function getServerSideRaydium(): { connection: any; owner: any; } {
+  throw new Error('Function not implemented.');
+}
+

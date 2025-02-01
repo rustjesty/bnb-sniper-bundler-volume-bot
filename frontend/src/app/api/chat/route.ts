@@ -2,10 +2,10 @@ import { streamCompletion } from '@/utils/groq';
 import logger from '@/utils/logger';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { validateEnvironment } from '@/lib/validation';
+import { PublicKey } from '@solana/web3.js';
 
-
-
-// Message type for chat requests
+// Type definitions
 interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
@@ -14,31 +14,42 @@ interface Message {
 interface ChatRequest {
   message: string;
   history?: Message[];
+  publicKey?: string;
+  poolId?: string;
 }
 
-// Rate limiting implementation
-const RATE_LIMIT = {
-  WINDOW_MS: 60000, // 1 minute
-  MAX_REQUESTS: 20
-};
-
-// Simple in-memory store for rate limiting
-const rateLimitStore = new Map<string, {
+interface RateLimitEntry {
   count: number;
   timestamp: number;
-}>();
+}
 
-// Clear old rate limit entries periodically
-setInterval(() => {
+// Constants
+const RATE_LIMIT = {
+  WINDOW_MS: 60000,
+  MAX_REQUESTS: 20,
+  CLEANUP_INTERVAL: 300000 // 5 minutes
+} as const;
+
+// Rate limiting store with proper typing
+const rateLimitStore = new Map<string, RateLimitEntry>();
+
+// Cleanup old rate limit entries
+const cleanup = () => {
   const now = Date.now();
   for (const [key, value] of rateLimitStore.entries()) {
     if (now - value.timestamp > RATE_LIMIT.WINDOW_MS) {
       rateLimitStore.delete(key);
     }
   }
-}, RATE_LIMIT.WINDOW_MS);
+};
 
-function isRateLimited(ip: string): boolean {
+// Set up periodic cleanup
+if (typeof setInterval !== 'undefined') {
+  setInterval(cleanup, RATE_LIMIT.CLEANUP_INTERVAL);
+}
+
+// Validation functions
+const isRateLimited = (ip: string): boolean => {
   const now = Date.now();
   const userRateLimit = rateLimitStore.get(ip);
 
@@ -58,112 +69,143 @@ function isRateLimited(ip: string): boolean {
 
   userRateLimit.count++;
   return false;
-}
+};
 
-function isBase58(str: string): boolean {
-  const base58Regex = /^[1-9A-HJ-NP-Za-km-z]+$/;
-  return base58Regex.test(str);
-}
+const validatePublicKey = (key: string): boolean => {
+  try {
+    new PublicKey(key);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const validatePoolId = (poolId: string): boolean => {
+  if (!poolId || typeof poolId !== 'string') return false;
+  return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(poolId);
+};
+
+const validateApiKey = (request: NextRequest): string | null => {
+  try {
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader?.startsWith('Bearer ')) return null;
+
+    const token = authHeader.split(' ')[1];
+    if (!token) return null;
+
+    // Check if token is in valid format
+    if (!/^[1-9A-HJ-NP-Za-km-z]{32,}$/.test(token)) return null;
+
+    return token;
+  } catch {
+    return null;
+  }
+};
+
+const validateRequest = (body: ChatRequest): string | null => {
+  if (!body.message?.trim()) {
+    return 'Message is required';
+  }
+
+  if (body.publicKey && !validatePublicKey(body.publicKey)) {
+    return 'Invalid public key format';
+  }
+
+  if (body.poolId && !validatePoolId(body.poolId)) {
+    return 'Invalid pool ID format';
+  }
+
+  if (body.history && !Array.isArray(body.history)) {
+    return 'History must be an array';
+  }
+
+  return null;
+};
 
 export async function POST(request: NextRequest) {
   try {
-    // Get client IP for rate limiting
+    // Validate environment
+    validateEnvironment();
+
+    // Get client IP and check rate limit
     const ip = request.headers.get('x-forwarded-for') || 
                request.headers.get('x-real-ip') || 
                'unknown';
     
-    // Check rate limit
     if (isRateLimited(ip)) {
       return NextResponse.json(
-        { error: 'Rate limit exceeded. Please try again later.' },
+        { error: 'Rate limit exceeded' },
         { status: 429 }
       );
     }
 
     // Validate API key
-    const apiKey = request.headers.get('Authorization')?.split(' ')[1];
+    const apiKey = validateApiKey(request);
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'API key required' },
+        { error: 'Invalid or missing API key' },
         { status: 401 }
       );
     }
 
-    if (!isBase58(apiKey)) {
+    // Parse and validate request body
+    let body: ChatRequest;
+    try {
+      body = await request.json();
+    } catch {
       return NextResponse.json(
-        { error: 'Invalid API key format' },
+        { error: 'Invalid JSON body' },
         { status: 400 }
       );
     }
 
-    // Validate endpoint URL
-    const endpointUrl = process.env.ENDPOINT_URL;
-    logger.info(`Endpoint URL: ${endpointUrl}`);
-    if (!endpointUrl || (!endpointUrl.startsWith('http:') && !endpointUrl.startsWith('https:'))) {
+    const validationError = validateRequest(body);
+    if (validationError) {
       return NextResponse.json(
-        { error: 'Invalid endpoint URL' },
-        { status: 500 }
-      );
-    }
-
-    // Parse request body
-    const body = await request.json() as ChatRequest;
-    
-    if (!body.message?.trim()) {
-      return NextResponse.json(
-        { error: 'Message is required' },
+        { error: validationError },
         { status: 400 }
       );
     }
 
-    // Format conversation history with proper typing
+    // Prepare messages array
     const messages: Message[] = [
       ...(body.history || []),
-      { role: 'user' as const, content: body.message }
+      { role: 'user', content: body.message }
     ];
 
     // Get streaming response
     const chunks: string[] = [];
     await streamCompletion(
       messages,
-      (chunk) => {
-        chunks.push(chunk);
-      },
+      (chunk) => chunks.push(chunk),
       apiKey
     );
 
-    // Combine chunks for final response
-    const response = chunks.join('');
-
+    // Return combined response
     return NextResponse.json({
-      response,
+      response: chunks.join(''),
       timestamp: new Date().toISOString()
     });
 
   } catch (error) {
     logger.error('Chat API error:', error);
 
-    // Handle specific error types
+    // Handle specific errors
     if (error instanceof Error) {
-      if (error.message.includes('API key')) {
-        return NextResponse.json(
-          { error: 'Invalid API key' },
-          { status: 401 }
-        );
-      }
-      
-      if (error.message.includes('rate limit')) {
-        return NextResponse.json(
-          { error: 'Rate limit exceeded on Groq API' },
-          { status: 429 }
-        );
-      }
+      const errorMessages = {
+        'Non-base58 character': { message: 'Invalid base58 format', status: 400 },
+        'Rate limit exceeded': { message: 'Too many requests', status: 429 },
+        'Invalid API key': { message: 'Authentication failed', status: 401 },
+        'Network error': { message: 'Service unavailable', status: 503 }
+      };
 
-      if (error.message.includes('Non-base58 character')) {
-        return NextResponse.json(
-          { error: 'Invalid API key format' },
-          { status: 400 }
-        );
+      for (const [key, value] of Object.entries(errorMessages)) {
+        if (error.message.includes(key)) {
+          return NextResponse.json(
+            { error: value.message },
+            { status: value.status }
+          );
+        }
       }
     }
 
@@ -175,7 +217,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Implement OPTIONS for CORS
+// CORS handling
 export async function OPTIONS() {
   return new NextResponse(null, {
     status: 204,
@@ -187,4 +229,3 @@ export async function OPTIONS() {
     },
   });
 }
-

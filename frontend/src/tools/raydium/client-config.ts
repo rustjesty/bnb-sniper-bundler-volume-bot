@@ -28,7 +28,7 @@ class ClientConnection {
   private connection: Connection | null = null;
   private config!: RaydiumConfig;
   private state: ClientState;
-  private maxRetries = 3;
+  private maxRetries = 3; 
   private retryDelay = 1000;
 
   private constructor() {

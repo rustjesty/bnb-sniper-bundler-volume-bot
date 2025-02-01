@@ -1,18 +1,37 @@
 import { Connection, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
+import bs58 from 'bs58';
 import logger from './logger';
 
 export type ChainType = 'solana' | 'ethereum' | 'invalid';
 
+// Add base58 validation helper
+export const isValidBase58 = (value: string): boolean => {
+  try {
+    if (!value) return false;
+    const decoded = bs58.decode(value);
+    return decoded.length > 0;
+  } catch {
+    return false;
+  }
+};
+
 /**
- * Validates a Solana address using PublicKey
+ * Validates a Solana address using PublicKey and bs58
  */
 export const validateSolanaAddress = (address: string): boolean => {
   try {
-    // Use PublicKey for proper validation
+    // First check base58 format
+    if (!isValidBase58(address)) {
+      return false;
+    }
+
+    // Then check PublicKey validity
     new PublicKey(address);
-    // Additional check for length and character set
+    
+    // Finally check length and character set
     return /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address);
   } catch (error) {
+    logger.debug('Invalid Solana address:', error);
     return false;
   }
 };
@@ -25,18 +44,25 @@ export const validateEthereumAddress = (address: string): boolean => {
 };
 
 /**
- * Validates a Solana transaction signature
+ * Validates a Solana transaction signature with base58 check
  */
 export const validateTransactionHash = (hash: string): boolean => {
   try {
-    // Solana transaction signatures are 88 characters long
+    // Check base58 format first
+    if (!isValidBase58(hash)) {
+      return false;
+    }
+    
+    // Check signature length
     if (!/^[1-9A-HJ-NP-Za-km-z]{87,88}$/.test(hash)) {
       return false;
     }
     
-    // Additional validation logic could be added here
-    return true;
+    // Try to decode the signature
+    const decoded = bs58.decode(hash);
+    return decoded.length === 64; // Solana signatures are 64 bytes
   } catch (error) {
+    logger.debug('Invalid transaction hash:', error);
     return false;
   }
 };
@@ -113,19 +139,37 @@ export const validateProgramId = (programId: string): boolean => {
 };
 
 /**
- * Formats and validates a Solana address for display
+ * Safe key creation with bs58 validation
+ */
+export const createSafePublicKey = (value: string): PublicKey | null => {
+  try {
+    if (!isValidBase58(value)) {
+      return null;
+    }
+    return new PublicKey(value);
+  } catch (error) {
+    logger.debug('Failed to create PublicKey:', error);
+    return null;
+  }
+};
+
+/**
+ * Formats and validates a Solana address with proper checks
  */
 export const formatAddress = (address: string, shortForm: boolean = true): string => {
   try {
-    if (!validateSolanaAddress(address)) {
-      throw new Error('Invalid address');
+    // Create PublicKey to validate format
+    const pubKey = createSafePublicKey(address);
+    if (!pubKey) {
+      throw new Error('Invalid address format');
     }
     
+    const base58Address = pubKey.toBase58();
     if (shortForm) {
-      return `${address.slice(0, 4)}...${address.slice(-4)}`;
+      return `${base58Address.slice(0, 4)}...${base58Address.slice(-4)}`;
     }
     
-    return address;
+    return base58Address;
   } catch (error) {
     logger.error('Error formatting address:', error);
     return 'Invalid Address';
@@ -133,7 +177,7 @@ export const formatAddress = (address: string, shortForm: boolean = true): strin
 };
 
 /**
- * Validates transaction parameters
+ * Validates transaction parameters with enhanced checks
  */
 export const validateTransactionParams = (params: {
   sender?: string;
@@ -144,20 +188,36 @@ export const validateTransactionParams = (params: {
   try {
     const { sender, recipient, amount, programId } = params;
 
-    if (sender && !validateSolanaAddress(sender)) {
-      return { isValid: false, error: 'Invalid sender address' };
+    // Enhanced validation with base58 checks
+    if (sender) {
+      if (!isValidBase58(sender)) {
+        return { isValid: false, error: 'Invalid sender address format' };
+      }
+      if (!validateSolanaAddress(sender)) {
+        return { isValid: false, error: 'Invalid sender address' };
+      }
     }
 
-    if (recipient && !validateSolanaAddress(recipient)) {
-      return { isValid: false, error: 'Invalid recipient address' };
+    if (recipient) {
+      if (!isValidBase58(recipient)) {
+        return { isValid: false, error: 'Invalid recipient address format' };
+      }
+      if (!validateSolanaAddress(recipient)) {
+        return { isValid: false, error: 'Invalid recipient address' };
+      }
+    }
+
+    if (programId) {
+      if (!isValidBase58(programId)) {
+        return { isValid: false, error: 'Invalid program ID format' };
+      }
+      if (!validateProgramId(programId)) {
+        return { isValid: false, error: 'Invalid program ID' };
+      }
     }
 
     if (amount && !validateSolanaAmount(amount)) {
       return { isValid: false, error: 'Invalid amount' };
-    }
-
-    if (programId && !validateProgramId(programId)) {
-      return { isValid: false, error: 'Invalid program ID' };
     }
 
     return { isValid: true };
@@ -181,10 +241,12 @@ export const isTokenMint = (address: string): boolean => {
   }
 };
 
+// Enhanced TransactionValidator with better checks
 export class TransactionValidator {
   private static readonly MAX_FEE_THRESHOLD = 0.1; // SOL
   private static readonly MIN_CONFIRMATIONS = 1;
   private static readonly CONFIRMATION_TIMEOUT = 60000; // ms
+  private static readonly RETRY_INTERVAL = 1000; // ms
 
   constructor(private connection: Connection) {}
 
@@ -197,6 +259,7 @@ export class TransactionValidator {
     }
   ): Promise<ValidationResult> {
     try {
+      // Validate transaction parameters
       if (params) {
         const paramValidation = validateTransactionParams(params);
         if (!paramValidation.isValid) {
@@ -204,6 +267,25 @@ export class TransactionValidator {
         }
       }
 
+      // Validate keys in transaction
+      if ('version' in transaction) {
+        // VersionedTransaction validation
+        const message = transaction.message;
+        for (const key of message.staticAccountKeys) {
+          if (!isValidBase58(key.toBase58())) {
+            return { isValid: false, error: 'Invalid account key in transaction' };
+          }
+        }
+      } else {
+        // Legacy Transaction validation
+        for (const key of transaction.signatures) {
+          if (!isValidBase58(key.publicKey.toBase58())) {
+            return { isValid: false, error: 'Invalid signature key in transaction' };
+          }
+        }
+      }
+
+      // Check transaction fee
       const fee = await this.connection.getFeeForMessage(
         'version' in transaction ? transaction.message : transaction.compileMessage(),
         'confirmed'
@@ -216,21 +298,34 @@ export class TransactionValidator {
       return { isValid: true };
     } catch (error) {
       logger.error('Transaction validation error:', error);
-      return { 
-        isValid: false, 
-        error: error instanceof Error ? error.message : 'Unknown validation error' 
+      return {
+        isValid: false,
+        error: error instanceof Error ? error.message : 'Unknown validation error'
       };
     }
   }
 
   async monitorTransaction(signature: string): Promise<MonitoringResult> {
+    // Validate signature format first
+    if (!validateTransactionHash(signature)) {
+      return { confirmed: false, error: 'Invalid transaction signature format' };
+    }
+
     const startTime = Date.now();
+    let attempts = 0;
 
     while (Date.now() - startTime < TransactionValidator.CONFIRMATION_TIMEOUT) {
       try {
+        attempts++;
         const status = await this.connection.getSignatureStatus(signature);
         
-        if (!status.value) continue;
+        if (!status.value) {
+          if (attempts > 5) {
+            return { confirmed: false, error: 'Transaction not found' };
+          }
+          await new Promise(resolve => setTimeout(resolve, TransactionValidator.RETRY_INTERVAL));
+          continue;
+        }
 
         if (status.value.err) {
           return { 
@@ -248,9 +343,12 @@ export class TransactionValidator {
           };
         }
 
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, TransactionValidator.RETRY_INTERVAL));
       } catch (error) {
         logger.error('Transaction monitoring error:', error);
+        if (attempts > 5) {
+          return { confirmed: false, error: 'Monitoring failed' };
+        }
       }
     }
 

@@ -4,13 +4,14 @@ import { aiService } from '../ai/ai';
 
 import { useState, useEffect } from 'react';
 import { Suspense } from 'react';
-import { validateApiKey } from '@/utils/groq';
+import { validateApiKey, streamCompletion, Message } from '@/utils/groq';
 import logger from '@/utils/logger';
 import { useWallet } from '@solana/wallet-adapter-react'; 
+import bs58 from 'bs58';
 
 // Components
-import ApiKeyModal from '@/components/ApiKeyModal';
-import Chat from '@/components/Chat';
+import ApiKeyModal from '@/components/ApiKeyModal'; 
+import Chat, { ChatProps } from '@/components/Chat';
 import { agentWallet } from '@/utils/wallet';
  
 // Constants
@@ -18,6 +19,17 @@ const STORAGE_KEYS = {
   API_KEY: 'jenna_api_key',
   WALLET_CONNECTED: 'jenna_wallet_connected'
 } as const;
+
+// Add API key validation helper
+const isValidStoredApiKey = (apiKey: string): boolean => {
+  try {
+    // Try to decode the key - if it's not base58, this will throw
+    const decoded = bs58.decode(apiKey);
+    return decoded.length > 0;
+  } catch {
+    return false;
+  }
+};
 
 export default function Home() {
   const { connected } = useWallet();
@@ -29,6 +41,8 @@ export default function Home() {
   const [isLoading, setIsLoading] = useState(true);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [priceAnalysis, setPriceAnalysis] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<Message[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
 
   // Check API key and initialize services
   useEffect(() => {
@@ -36,26 +50,39 @@ export default function Home() {
       try {
         setIsLoading(true);
 
-        // Check for existing API key
+        // Check stored API key with improved validation
         const storedApiKey = localStorage.getItem(STORAGE_KEYS.API_KEY);
-        if (storedApiKey) {
-          const isValid = await validateApiKey(storedApiKey);
-          setHasValidApiKey(isValid);
-          setIsApiKeyModalOpen(!isValid);
+        if (storedApiKey && isValidStoredApiKey(storedApiKey)) {
+          try {
+            const isValid = await validateApiKey(storedApiKey);
+            setHasValidApiKey(isValid);
+            setIsApiKeyModalOpen(!isValid);
+          } catch (error) {
+            logger.error('API key validation error:', error);
+            setHasValidApiKey(false);
+            setIsApiKeyModalOpen(true);
+            localStorage.removeItem(STORAGE_KEYS.API_KEY); // Clear invalid key
+          }
         } else {
           setIsApiKeyModalOpen(true);
+          if (storedApiKey) {
+            localStorage.removeItem(STORAGE_KEYS.API_KEY); // Clear invalid key
+          }
         }
 
-        // Initialize wallet
+        // Initialize wallet with better error handling
         try {
           const walletConnected = await agentWallet.initialize();
           setIsWalletInitialized(walletConnected);
-          localStorage.setItem(STORAGE_KEYS.WALLET_CONNECTED, String(walletConnected));
-          logger.success('Services initialized successfully');
+          if (walletConnected) {
+            localStorage.setItem(STORAGE_KEYS.WALLET_CONNECTED, 'true');
+            logger.success('Wallet initialized successfully');
+          }
         } catch (error) {
           console.error('Wallet initialization error:', error);
           setIsWalletInitialized(false);
-          logger.warn('Services initialization partial or failed');
+          localStorage.removeItem(STORAGE_KEYS.WALLET_CONNECTED);
+          logger.warn('Wallet initialization failed');
         }
 
       } catch (error) {
@@ -70,21 +97,27 @@ export default function Home() {
     initializeServices();
   }, []);
 
-  // Handle API key submission
+  // Handle API key submission with improved validation
   const handleApiKeySubmit = async (apiKey: string) => {
     try {
+      if (!isValidStoredApiKey(apiKey)) {
+        throw new Error('Invalid API key format');
+      }
+
       const isValid = await validateApiKey(apiKey);
-      
       if (isValid) {
         localStorage.setItem(STORAGE_KEYS.API_KEY, apiKey);
         setHasValidApiKey(true);
         setIsApiKeyModalOpen(false);
+        logger.success('API key validated and stored');
       } else {
-        throw new Error('Invalid API key');
+        throw new Error('API key validation failed');
       }
     } catch (error) {
       console.error('API key validation error:', error);
       setHasValidApiKey(false);
+      localStorage.removeItem(STORAGE_KEYS.API_KEY);
+      // Show error to user (you might want to add an error state and display)
     }
   };
 
@@ -115,6 +148,28 @@ export default function Home() {
       logger.error('Error fetching and analyzing price:', error);
       setPriceAnalysis('Error fetching and analyzing price. Please try again.');
     }
+  };
+
+  const handleSendMessage = async (message: string) => {
+    const newMessage: Message = { role: 'user', content: message };
+    setChatMessages([...chatMessages, newMessage]);
+
+    setIsStreaming(true);
+    await streamCompletion(
+      [...chatMessages, newMessage],
+      (chunk) => {
+        setChatMessages((prevMessages) => {
+          const lastMessage = prevMessages[prevMessages.length - 1];
+          if (lastMessage.role === 'assistant') {
+            lastMessage.content += chunk;
+            return [...prevMessages.slice(0, -1), lastMessage];
+          } else {
+            return [...prevMessages, { role: 'assistant', content: chunk }];
+          }
+        });
+      }
+    );
+    setIsStreaming(false);
   };
 
   // Loading state
@@ -149,8 +204,6 @@ export default function Home() {
           </div>
         </div>
 
-        
-
         {walletAddress && (
           <div className="mt-8">
             <button
@@ -176,7 +229,13 @@ export default function Home() {
             </div>
           }
         >
-          {hasValidApiKey && <Chat />}
+          {hasValidApiKey && (
+            <Chat 
+              messages={chatMessages}
+              onSendMessage={handleSendMessage}
+              isStreaming={isStreaming}
+            />
+          )}
         </Suspense>
 
         <ApiKeyModal 

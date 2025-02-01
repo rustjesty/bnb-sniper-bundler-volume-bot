@@ -2,7 +2,7 @@
 
 import { getServerEnv } from '@/lib/env';
 
-export const runtime = 'edge'; // Use Edge Runtime
+//export const runtime = 'edge'; // Use Edge Runtime
 export const dynamic = 'force-dynamic'; // No caching
 
 export function createRouteHandler() {

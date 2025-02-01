@@ -3,13 +3,8 @@ import ReactMarkdown from 'react-markdown';
 import Image from 'next/image';
 import { useWallet } from '@solana/wallet-adapter-react';
 import  SwapInterface  from '@/components/SwapInterface';
-import { streamCompletion } from '@/utils/groq';
+import { streamCompletion, Message } from '@/utils/groq';
 import { IconArrowRight, IconBolt, IconCoin, IconWallet, IconMicrophone } from './Icon';
-
-interface Message {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
 
 declare global {
   interface Window {
@@ -60,10 +55,14 @@ function useWalletStatus() {
   };
 }
 
-export default function Chat() {
-  const [messages, setMessages] = useState<Message[]>([]);
+export interface ChatProps {
+  messages: Message[];
+  onSendMessage: (message: string) => Promise<void>;
+  isStreaming: boolean;
+}
+
+const Chat: React.FC<ChatProps> = ({ messages, onSendMessage, isStreaming }) => {
   const [input, setInput] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [swapModalVisible, setSwapModalVisible] = useState(false);
   const [swapTokens, setSwapTokens] = useState<{from: string; to: string; amount?: number}>();
@@ -119,7 +118,7 @@ export default function Chat() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isStreaming) return;
 
     // Check for trade command
     const tradeCommand = parseTradeCommand(input);
@@ -133,38 +132,8 @@ export default function Chat() {
       return;
     }
 
-    const userMessage: Message = { role: 'user', content: input.trim() };
-    setMessages(prev => [...prev, userMessage]);
+    await onSendMessage(input.trim());
     setInput('');
-    setIsLoading(true);
-
-    try {
-      await streamCompletion(
-        [...messages, userMessage],
-        (chunk) => {
-          setMessages(prev => {
-            const newMessages = [...prev];
-            const lastMessage = newMessages[newMessages.length - 1];
-            
-            if (lastMessage?.role === 'assistant') {
-              return [
-                ...newMessages.slice(0, -1),
-                { ...lastMessage, content: lastMessage.content + chunk }
-              ];
-            }
-            return [...newMessages, { role: 'assistant', content: chunk }];
-          });
-        }
-      );
-    } catch (error) {
-      console.error('Error:', error);
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: 'I encountered an error. Please try again.'
-      }]);
-    } finally {
-      setIsLoading(false);
-    }
   };
 
   const toggleListening = () => {
@@ -282,7 +251,7 @@ export default function Chat() {
           </button>
           <button
             type="submit"
-            disabled={isLoading || !input.trim()}
+            disabled={isStreaming || !input.trim()}
             className="absolute right-2 bottom-2 top-2 px-4 bg-purple-500 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-purple-600 transition-colors duration-200"
           >
             <IconArrowRight className="w-5 h-5" />
@@ -291,4 +260,6 @@ export default function Chat() {
       </div>
     </div>
   );
-}
+};
+
+export default Chat;

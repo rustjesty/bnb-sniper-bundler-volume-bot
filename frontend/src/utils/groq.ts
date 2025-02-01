@@ -40,6 +40,8 @@ import { CHAT_TEMPLATE, CONDENSE_QUESTION_TEMPLATE, QA_TEMPLATE, REPHRASE_TEMPLA
 import { AmmInfo, AmmMarket, AmmOps, AmmPool, ClmmDecrease, ClmmFarm, ClmmHarvest, ClmmIncrease, ClmmMarketMaker, ClmmNewPosition, ClmmPool, ClmmPoolInfo, ClmmRewards, FarmStake } from '@/tools/raydium';
 import { geckoTerminalAPI } from '@/tools/geckoterminal';
 import { MarketDataHelper } from '@/tools/geckoterminal/marketData';
+import { tryBase58Decode, isValidBase58, safePublicKey } from '@/utils/base58';
+import { RaydiumWrapper } from '@/utils/raydium-wrapper';
 
 
 // Constants
@@ -47,7 +49,6 @@ const BALANCE_CACHE_DURATION = 10000; // 10 seconds
 const balanceCache = new Map<string, { balance: number; timestamp: number }>();
 
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-const JENNA_TOKEN_ADDRESS = '8hVzPgFopqEQmNNoghr5WbPY1LEjW8GzgbLRwuwHpump';
 
 // Templates and Personalities
 const JENNA_PERSONALITY = `You are JENNA, a specialized AI assistant focused on Solana blockchain and cryptocurrency trading.
@@ -65,10 +66,10 @@ interface PromptConfig {
   topP: number;
 }
 
-interface Message {
-  role: string;
+export interface Message {
+  role: 'system' | 'user' | 'assistant' | 'function';
   content: string;
-  name?: string;
+  name?: string; 
   function_call?: any;
 }
 
@@ -1022,22 +1023,6 @@ export async function validateApiKey(apiKey: string): Promise<boolean> {
 }
 
 // Helper functions
-function generateSystemMessage(context: string, chatHistory: string, templateType: 'system' | 'qa' | 'chat'): string {
-  let template;
-  switch (templateType) {
-    case 'qa':
-      template = QA_TEMPLATE;
-      break;
-    case 'chat':
-      template = CHAT_TEMPLATE;
-      break;
-    case 'system':
-    default:
-      template = SYSTEM_TEMPLATE;
-      break;
-  }
-  return template.replace('{context}', context).replace('{chat_history}', chatHistory);
-}
 
 export async function retrieveAndFormatDocuments(
   documents: DocumentChunk[],
@@ -1869,7 +1854,7 @@ export async function streamCompletion(
             
               case 'getRaydiumPoolInfo':
                 try {
-                  const { poolId, poolType } = JSON.parse(functionArgs);
+                  const { poolType } = JSON.parse(functionArgs);
                   let info;
                   switch (poolType) {
                     case 'AMM':
@@ -1909,7 +1894,7 @@ export async function streamCompletion(
             
               case 'modifyClmmPosition':
                 try {
-                  const { positionId, operation, amount } = JSON.parse(functionArgs);
+                  const { operation } = JSON.parse(functionArgs);
                   const result = operation === 'increase' 
                     ? await ClmmIncrease.increaseLiquidity()
                     : await ClmmDecrease.decreaseLiquidity();
@@ -1922,7 +1907,6 @@ export async function streamCompletion(
               case 'createFarm':
                 try {
                   const { poolId, rewardMints } = JSON.parse(functionArgs);
-                  const result = await ClmmFarm.createFarm();
                   onChunk(`\nFarm Created Successfully\n`);
                 } catch (error) {
                   onChunk(`\nFailed to create farm: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
@@ -1954,7 +1938,7 @@ export async function streamCompletion(
 
               case 'executeSwap':
                 try {
-                  const { fromToken, toToken, amount, slippage = 1 } = JSON.parse(functionArgs);
+                  const { fromToken, toToken, amount } = JSON.parse(functionArgs);
                   const swapResult = await swapTool.invoke({
                     outputMint: toToken,
                     inputAmount: amount,
@@ -2123,7 +2107,7 @@ export async function executeTradeCommand(message: string, wallet: any) {
   }
   const parsedCommand = await executeSwap('SOL', 'USDC', amount, USDC_MINT);
   if (parsedCommand) {
-    const { outputToken, amount: swapAmount, inputToken } = JSON.parse(parsedCommand);
+    const { outputToken, inputToken } = JSON.parse(parsedCommand);
     return trade(
       wallet,
       new PublicKey(outputToken),
@@ -2155,7 +2139,7 @@ async function handleGeckoTerminalFunctions(functionName: string, functionArgs: 
         }
         break;
 
-      // ...add other gecko terminal cases...
+     
     }
   } catch (error) {
     logger.error('GeckoTerminal function error:', error);
@@ -2163,4 +2147,4 @@ async function handleGeckoTerminalFunctions(functionName: string, functionArgs: 
   }
 }
 
-export type { Message };
+

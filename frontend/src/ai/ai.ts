@@ -2,7 +2,7 @@ import {CONFIG} from "../config/settings";
 import { MarketAnalysis, MarketMetrics } from "../../../src/services/blockchain/types.js";
 
 
-import { Message, streamCompletion, validateApiKey } from '@/utils/groq';
+import { streamCompletion, validateApiKey } from '@/utils/groq';
 import logger from "@/utils/logger";
 import { validateSolanaAddress, validateTransactionHash } from '@/utils/validation';
 import { getSolanaPrice, getTrendingSolanaTokens } from '@/utils/coingecko';
@@ -41,13 +41,20 @@ interface MarketContext {
 
 interface MarketData extends MarketMetrics {
   priceChange24h: number;
-  momentum: number; // Add missing properties
-  strength: number; // Add missing properties
+  momentum: number; 
+  strength: number; 
 }
 
 interface ChatCommand {
   type: 'price' | 'market' | 'trade' | 'wallet' | 'info' | 'portfolio' | 'airdrop' | 'trending';
   args: string[];
+}
+
+interface Message {
+  role: 'system' | 'user' | 'assistant' | 'function';
+  content: string;
+  name?: string; 
+  function_call?: any;
 }
 
 export class AIService {

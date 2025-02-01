@@ -69,6 +69,8 @@ interface SwapResult {
 }
 
 interface TokenMetadata {
+  decimals: number;
+  logoURI: string | undefined;
   name: any;
   price: any;
   liquidity: any;
@@ -99,7 +101,9 @@ export async function getTokenInfo(mintAddress: string): Promise<TokenMetadata |
       symbol: data.symbol,
       name: data.name,
       price: data.price,
-      liquidity: null // You might want to fetch this from another source
+      liquidity: null, // You might want to fetch this from another source
+      decimals: 9, // Default to 9 decimals for Solana tokens
+      logoURI: undefined
     };
   } catch (error) {
     logger.error('Error fetching Jupiter token info:', error);

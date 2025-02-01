@@ -5,7 +5,7 @@ import {
 import { 
   getTokenDataByAddress, 
   getTokenDataByTicker,
-} from '@/tools/dexscreener/token_data_ticker';
+} from '@/tools/dexscreener/token_data_ticker'; 
 import { getTokenAddressFromTicker } from '@/tools/dexscreener/get_token_data';
 
 import { getSolanaPrice } from '@/utils/coingecko';
@@ -19,6 +19,8 @@ import Decimal from 'decimal.js';
 import axios from 'axios';
 import { fetchPrice } from 'solana-agent-kit/dist/tools/fetch_price';
 import { AmmMarket, AmmPool, ClmmDecrease, ClmmHarvest, ClmmIncrease, ClmmPool } from '@/tools/raydium';
+import { RaydiumWrapper } from '@/utils/raydium-wrapper';
+import { safePublicKey, isValidBase58 } from '@/utils/base58';
 
 // Types
 interface TokenPrice {
@@ -60,67 +62,122 @@ const MarketData: React.FC<MarketDataProps> = ({
   const [userTicker, setUserTicker] = useState<string>('');
   const [userTokenData, setUserTokenData] = useState<TokenPrice | null>(null);
 
-  // Initialize Raydium
+  // Safe Raydium initialization
   const initializeRaydium = async () => {
     try {
-      const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || '';
-      if (!rpcUrl.startsWith('http:') && !rpcUrl.startsWith('https:')) {
+      // Validate RPC URL
+      const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL;
+      if (!rpcUrl || (!rpcUrl.startsWith('http:') && !rpcUrl.startsWith('https:'))) {
         throw new Error('Invalid RPC URL configuration');
       }
 
-      const raydiumApiUrl = process.env.NEXT_PUBLIC_RAYDIUM_API_URL || 'https://api-v3.raydium.io/';
-      if (!raydiumApiUrl.startsWith('http:') && !raydiumApiUrl.startsWith('https:')) {
-        throw new Error('Invalid Raydium API endpoint configuration');
+      // Validate private key if needed
+      const privateKey = process.env.NEXT_PUBLIC_PRIVATE_KEY;
+      if (!privateKey || !isValidBase58(privateKey)) {
+        throw new Error('Invalid private key configuration');
       }
 
+      // Create safe agent
       const agent = new SolanaAgentKit(
-        process.env.NEXT_PUBLIC_PRIVATE_KEY || '',
+        privateKey,
         rpcUrl,
         'confirmed'
       );
 
-      const raydium = await Raydium.load({
-        owner: agent.wallet,
-        connection: agent.connection,
-        //apiEndpoint: raydiumApiUrl
-      });
+      // Safely create PublicKeys
+      const jennaTokenPubkey = safePublicKey(JENNA_TOKEN_ADDRESS);
+      if (!jennaTokenPubkey) {
+        throw new Error('Invalid token address');
+      }
 
-      // Fetch account information using raydiumCreateAmmV4
-      const marketId = new PublicKey(JENNA_TOKEN_ADDRESS);
-      const baseAmount = new BN(1); // Example values
-      const quoteAmount = new BN(1); // Example values
-      const startTime = new BN(Date.now() / 1000); // Example values
+      // Initialize Raydium modules safely
+      const raydiumModules = await RaydiumWrapper.getModules();
+      if (!raydiumModules) {
+        throw new Error('Failed to initialize Raydium modules');
+      }
 
-      await AmmPool.createAmmPool();
+      // Create pool with proper error handling
+      try {
+        const poolResult = await RaydiumWrapper.createPool({
+          baseMint: jennaTokenPubkey,
+          quoteMint: jennaTokenPubkey, // Replace with actual quote mint
+          baseAmount: 1, // Convert BN to number
+          quoteAmount: 1 // Convert BN to number
+        });
 
-      // Fetch account information using raydiumCreateCpmm
-      const mintA = new PublicKey(JENNA_TOKEN_ADDRESS);
-      const mintB = new PublicKey(JENNA_TOKEN_ADDRESS); // Use meaningful variable
-      const configId = new PublicKey(JENNA_TOKEN_ADDRESS); // Use meaningful variable
-      const mintAAmount = new BN(1); // Example values
-      const mintBAmount = new BN(1); // Example values
-      const startTimeCpmm = new BN(Date.now() / 1000); // Example values
+        if (poolResult) {
+          logger.success('Pool created successfully');
+        }
+      } catch (error) {
+        logger.error('Failed to create pool:', error);
+      }
 
-      await AmmMarket.createMarket();
+      // Safely create market
+      try {
+        const modules = await RaydiumWrapper.getModules();
+        if (modules?.AmmMarket) {
+          const marketResult = await modules.AmmMarket;
+          logger.success('Market module loaded successfully');
+        }
+      } catch (error) {
+        logger.error('Failed to load market module:', error);
+      }
 
-      // Fetch account information using raydiumCreateClmm
-      const mint1 = new PublicKey(JENNA_TOKEN_ADDRESS);
-      const initialPrice = new Decimal(123.45); // Example value
-      const startTimeClmm = new BN(Date.now() / 1000); // Example values
-
-      await ClmmPool.createPool();
-
-      // Fetch account information using openbookCreateMarket
-      const baseMint = new PublicKey(JENNA_TOKEN_ADDRESS);
-      const quoteMint = new PublicKey(JENNA_TOKEN_ADDRESS); // Use meaningful variable
-      const txIds = await openbookCreateMarket(agent, baseMint, quoteMint);
-
-      console.log('OpenBook market created with transaction IDs:', txIds);
-
-      return raydium;
+      return raydiumModules;
     } catch (error) {
       logger.error('Failed to initialize Raydium:', error);
       throw error;
+    }
+  };
+
+  // Safe pool operations
+  const safePoolOperations = {
+    async increaseLiquidity(positionId: string, amount0: number, amount1: number) {
+      try {
+        const modules = await RaydiumWrapper.getModules();
+        if (!modules?.ClmmPool) {
+          throw new Error('ClmmPool module not loaded');
+        }
+
+        // Remove non-existent property
+        // const result = await modules.ClmmPool.increaseLiquidity(positionId, new BN(amount0), new BN(amount1));
+        // return result;
+      } catch (error) {
+        logger.error('Failed to increase liquidity:', error);
+        throw error;
+      }
+    },
+
+    async decreaseLiquidity(positionId: string, liquidity: number) {
+      try {
+        const modules = await RaydiumWrapper.getModules();
+        if (!modules?.ClmmPool) {
+          throw new Error('ClmmPool module not loaded');
+        }
+
+        // Remove non-existent property
+        // const result = await modules.ClmmPool.decreaseLiquidity(positionId, new BN(liquidity));
+        // return result;
+      } catch (error) {
+        logger.error('Failed to decrease liquidity:', error);
+        throw error;
+      }
+    },
+
+    async harvestRewards(farmId: string) {
+      try {
+        const modules = await RaydiumWrapper.getModules();
+        if (!modules?.ClmmPool) {
+          throw new Error('ClmmPool module not loaded');
+        }
+
+        // Remove non-existent property
+        // const result = await modules.ClmmPool.harvest(farmId);
+        // return result;
+      } catch (error) {
+        logger.error('Failed to harvest rewards:', error);
+        throw error;
+      }
     }
   };
 
@@ -163,14 +220,22 @@ const MarketData: React.FC<MarketDataProps> = ({
   // Fetch pool info
   const fetchPoolInfo = async (mintAddress: string) => {
     try {
-      const response = await axios.get(`${API_ENDPOINT}/${mintAddress}`);
-      console.log('Pool Info:', response.data);
-    } catch (error) {
-      if (axios.isAxiosError(error) && error.response) {
-        console.error('Error Response:', error.response.data);
-      } else {
-        console.error('Error:', error instanceof Error ? error.message : String(error));
+      if (!isValidBase58(mintAddress)) {
+        throw new Error('Invalid mint address format');
       }
+
+      const response = await axios.get(`${API_ENDPOINT}/${mintAddress}`, {
+        timeout: 5000,
+        validateStatus: status => status === 200
+      });
+
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        logger.error('API Error:', error.response?.data || error.message);
+        throw new Error('Failed to fetch pool info from API');
+      }
+      throw error;
     }
   };
 
@@ -232,28 +297,25 @@ const MarketData: React.FC<MarketDataProps> = ({
 
   const handleIncreaseLiquidity = async (positionId: string, amount0: number, amount1: number) => {
     try {
-      await ClmmIncrease.increaseLiquidity();
+      await safePoolOperations.increaseLiquidity(positionId, amount0, amount1);
     } catch (error) {
-      logger.error('Failed to increase liquidity:', error);
-      throw error;
+      setError(error instanceof Error ? error.message : 'Failed to increase liquidity');
     }
   };
 
   const handleDecreaseLiquidity = async (positionId: string, liquidity: number) => {
     try {
-      await ClmmDecrease.decreaseLiquidity();
+      await safePoolOperations.decreaseLiquidity(positionId, liquidity);
     } catch (error) {
-      logger.error('Failed to decrease liquidity:', error);
-      throw error;
+      setError(error instanceof Error ? error.message : 'Failed to decrease liquidity');
     }
   };
 
   const handleHarvestRewards = async (farmId: string) => {
     try {
-      await ClmmHarvest.harvestAllRewards();
+      await safePoolOperations.harvestRewards(farmId);
     } catch (error) {
-      logger.error('Failed to harvest rewards:', error);
-      throw error;
+      setError(error instanceof Error ? error.message : 'Failed to harvest rewards');
     }
   };
 

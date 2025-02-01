@@ -1,16 +1,14 @@
 // src/app/api/raydium/route.ts
-import { NextResponse } from 'next/server';
-
-import { initializeConnection } from '../../../tools/raydium/config';
 import { middleware } from '../../../tools/middleware';
+import { initializeServerConnection, initializeServerWallet, SERVER_CONFIG } from '../../../tools/raydium/config';
 
 // Enable edge runtime and dynamic behavior
-export const runtime = 'edge';
+//export const runtime = 'edge';
 export const dynamic = 'force-dynamic';
 
 // Apply middleware before handling request
 export async function GET(request: Request) {
-  try {
+  try { 
     // Run middleware first
     const middlewareResponse = await middleware(request);
     if (middlewareResponse.status !== 200) {
@@ -18,7 +16,9 @@ export async function GET(request: Request) {
     }
 
     // Initialize Raydium connection
-    const { connection, owner, network } = await initializeConnection();
+    const connection = initializeServerConnection();
+    const owner = initializeServerWallet();
+    const network = SERVER_CONFIG.network;
     
     // Test the connection
     const balance = await connection.getBalance(owner.publicKey);
@@ -45,3 +45,4 @@ export async function GET(request: Request) {
     });
   }
 }
+

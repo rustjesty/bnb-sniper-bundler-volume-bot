@@ -1,7 +1,7 @@
 import { Transaction, PublicKey } from '@solana/web3.js'
 import { NATIVE_MINT } from '@solana/spl-token'
 import axios, { AxiosResponse } from 'axios'
-import { connection, owner } from '../config'
+import { getConnection, owner } from '../config'
 import {
   API_URLS,
   ApiSwapV1Out,
@@ -45,12 +45,12 @@ export const swapBaseOutInstruction = async () => {
   ]
 
   // get input/output token account ata
-  const inputAccount = getATAAddress(owner.publicKey, new PublicKey(inputMint), new PublicKey(mintAProgram)).publicKey
-  const outputAccount = getATAAddress(owner.publicKey, new PublicKey(outputMint), new PublicKey(mintBProgram)).publicKey
+  const inputAccount = getATAAddress(owner().publicKey, new PublicKey(inputMint), new PublicKey(mintAProgram)).publicKey
+  const outputAccount = getATAAddress(owner().publicKey, new PublicKey(outputMint), new PublicKey(mintBProgram)).publicKey
 
   const ins = swapBaseOutAutoAccount({
     programId: ALL_PROGRAM_ID.Router,
-    wallet: owner.publicKey,
+    wallet: owner().publicKey,
     inputAccount,
     outputAccount,
     routeInfo: swapResponse,
@@ -61,13 +61,13 @@ export const swapBaseOutInstruction = async () => {
     units: 600000,
     microLamports: 6000000,
   })
-  const recentBlockhash = (await connection.getLatestBlockhash()).blockhash
+  const recentBlockhash = (await getConnection().getLatestBlockhash()).blockhash
   const tx = new Transaction()
   instructions.forEach((ins) => tx.add(ins))
   tx.add(ins)
-  tx.feePayer = owner.publicKey
+  tx.feePayer = owner().publicKey
   tx.recentBlockhash = recentBlockhash
-  tx.sign(owner)
+  tx.sign(owner())
 
   printSimulate([tx])
 }

@@ -1,6 +1,7 @@
 import { Raydium } from '@raydium-io/raydium-sdk-v2';
 import { ConnectionManager } from './clientConfig';
-import { getWalletFromServer } from './serverConfig';
+import { initializeServerWallet } from './serverConfig'; // Import the correct function
+
 import { Connection } from '@solana/web3.js';
 
 class RaydiumService {
@@ -28,7 +29,7 @@ class RaydiumService {
 
     try {
       const connection = this.connectionManager.getConnection();
-      const owner = await getWalletFromServer();
+      const owner = await initializeServerWallet(); // Use the correct function
       
       const cluster = process.env.NEXT_PUBLIC_SOLANA_CLUSTER === 'devnet' ? 'devnet' : undefined;
       

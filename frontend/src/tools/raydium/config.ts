@@ -11,8 +11,8 @@ import type {
 
 import { TxVersion } from '@raydium-io/raydium-sdk-v2';
 import { Connection, Keypair, Cluster, ConnectionConfig, clusterApiUrl } from '@solana/web3.js';
-import { createServerConnection, EnvironmentConfig, initializeServerConfig } from './serverConfig';
-import { createClientConnection, initializeClientConfig } from './clientConfig';
+import {  initializeServerConnection } from './serverConfig';
+import { createClientConnection, initializeClient } from './clientConfig';
 import { ROUTE_CONFIG } from './routeConfig';
 import { ServiceConfig } from './core/types';
 
@@ -183,6 +183,14 @@ export const getClientEnvVar = (key: string, fallback: string): string => {
   throw new Error(`Environment variable ${key} is only accessible on the client side.`);
 };
 
+export const getDefaultPoolId = (): string => {
+  const poolId = process.env.NEXT_PUBLIC_DEFAULT_POOL_ID;
+  if (!poolId) {
+    throw new Error('Default pool ID not configured');
+  }
+  return poolId;
+};
+
 // Types
 export type EnvironmentType = 'client' | 'server';
 
@@ -203,15 +211,15 @@ export type UtilityType = {
 // Constants and types exports
 export {
   TxVersion,
-  type EnvironmentConfig,
+  //type EnvironmentConfig,
 };
 
 // Re-export everything
 export {
-  initializeClientConfig,
-  initializeServerConfig,
-  createServerConnection,
+  initializeClient,
+  initializeServerConnection,
   getServerConnection,
+  
   RaydiumService,
   ROUTE_CONFIG,
   ConnectionManager
@@ -236,7 +244,7 @@ export const SHARED_CONFIG = {
 // Initialize function
 export const initialize = async () => {
   if (isServer) {
-    return createServerConnection();
+    return getServerConnection();
   }
   return createClientConnection();
 };

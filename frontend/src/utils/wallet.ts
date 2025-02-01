@@ -1,12 +1,13 @@
 import { Connection, VersionedTransaction, PublicKey, Transaction } from '@solana/web3.js';
 import logger from './logger';
 import { parsePrivateKey } from './keys';
+import { tryBase58Decode, isValidBase58 } from './base58';
 
 // Types
 interface WalletBalance {
   balance: number;
   address: string;
-}
+} 
 
 interface TransactionResult {
   signature: string;
@@ -24,15 +25,20 @@ interface ConnectionConfig {
   fallback: RPCConfig | null;
 }
 
-
+interface ConnectionState {
+  connection: Connection;
+  lastHealthCheck: number;
+  errorCount: number;
+}
 
 export class AgentWallet {
-  private primaryConnection: Connection | null = null;
-  private fallbackConnection: Connection | null = null;
+  private primaryConnection: ConnectionState | null = null;
+  private fallbackConnection: ConnectionState | null = null;
   private isUsingFallback: boolean = false;
   private readonly baseUrl: string;
   private readonly maxRetries: number = 3;
   private readonly retryDelay: number = 2000;
+  private readonly healthCheckInterval = 30000; // 30 seconds
 
   constructor() {
     // Initialize RPC configurations
@@ -116,51 +122,101 @@ export class AgentWallet {
     return url;
   }
 
-  private createConnection(url: string): Connection {
-    const validatedUrl = this.validateAndFormatUrl(url);
-    
-    return new Connection(validatedUrl, {
-      commitment: 'confirmed',
-      confirmTransactionInitialTimeout: 60000,
-      wsEndpoint: undefined, // Disable WebSocket
-      fetch: (input: RequestInfo | URL, init?: RequestInit) => {
-        return fetch(input, {
+  // Safe connection creation with validation and health monitoring
+  private createConnection(url: string): ConnectionState {
+    try {
+      const validatedUrl = this.validateAndFormatUrl(url);
+      
+      const connection = new Connection(validatedUrl, {
+        commitment: 'confirmed',
+        confirmTransactionInitialTimeout: 60000,
+        wsEndpoint: undefined,
+        fetch: this.createSafeFetch()
+      });
+
+      return {
+        connection,
+        lastHealthCheck: Date.now(),
+        errorCount: 0
+      };
+    } catch (error) {
+      logger.error('Connection creation failed:', error);
+      throw error;
+    }
+  }
+
+  // Safe fetch with timeout and retries
+  private createSafeFetch() {
+    return async (input: RequestInfo | URL, init?: RequestInit) => {
+      const timeout = 30000;
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+      try {
+        const response = await fetch(input, {
           ...init,
+          signal: controller.signal,
           headers: {
             ...init?.headers,
             'Content-Type': 'application/json'
           }
         });
+        return response;
+      } finally {
+        clearTimeout(timeoutId);
       }
-    });
+    };
   }
 
-  // Rest of the class implementation remains the same...
+  // Connection health monitoring
+  private async checkConnectionHealth(state: ConnectionState): Promise<boolean> {
+    try {
+      const start = performance.now();
+      await state.connection.getSlot();
+      const latency = performance.now() - start;
+
+      // Update health metrics
+      state.lastHealthCheck = Date.now();
+      state.errorCount = Math.max(0, state.errorCount - 1);
+
+      return latency < 1000; // Consider healthy if latency < 1s
+    } catch (error) {
+      state.errorCount++;
+      logger.error('Connection health check failed:', error);
+      return false;
+    }
+  }
+
+  // Safe connection getter with health check
   public async getActiveConnection(): Promise<Connection> {
-    if (!this.isUsingFallback) {
-      try {
-        if (!this.primaryConnection) {
-          throw new Error('Primary connection not initialized');
+    const now = Date.now();
+
+    // Check primary connection health
+    if (!this.isUsingFallback && this.primaryConnection) {
+      if (now - this.primaryConnection.lastHealthCheck > this.healthCheckInterval) {
+        const isHealthy = await this.checkConnectionHealth(this.primaryConnection);
+        if (!isHealthy && this.primaryConnection.errorCount >= 3) {
+          this.isUsingFallback = true;
+          logger.warn('Switching to fallback connection');
         }
-        await this.primaryConnection.getSlot();
-        return this.primaryConnection;
-      } catch (error) {
-        logger.warn('Primary RPC failed, switching to fallback:', error);
-        this.isUsingFallback = true;
+      }
+      if (!this.isUsingFallback) {
+        return this.primaryConnection.connection;
       }
     }
 
-    if (!this.fallbackConnection) {
-      throw new Error('Fallback connection not initialized');
+    // Check fallback connection
+    if (this.fallbackConnection) {
+      if (now - this.fallbackConnection.lastHealthCheck > this.healthCheckInterval) {
+        const isHealthy = await this.checkConnectionHealth(this.fallbackConnection);
+        if (!isHealthy && this.fallbackConnection.errorCount >= 3) {
+          throw new Error('All connections unhealthy');
+        }
+      }
+      return this.fallbackConnection.connection;
     }
 
-    try {
-      await this.fallbackConnection.getSlot();
-      return this.fallbackConnection;
-    } catch (error) {
-      logger.error('All RPC connections failed:', error);
-      throw new Error('No available RPC connection');
-    }
+    throw new Error('No available connections');
   }
 
   public async getBalance(): Promise<WalletBalance> {
@@ -262,18 +318,56 @@ export class AgentWallet {
     return walletInfo.address;
   }
 
+  // Safe initialization with proper validation
   public async initialize(): Promise<boolean> { 
     try {
+      const configs = await this.validateConfigs();
+      
+      // Initialize connections with validated configs
+      if (configs.primary) {
+        this.primaryConnection = this.createConnection(configs.primary.url);
+      }
+      if (configs.fallback) {
+        this.fallbackConnection = this.createConnection(configs.fallback.url);
+      }
+
+      // Verify at least one connection works
       const connection = await this.getActiveConnection();
       const slot = await connection.getSlot();
-      logger.success('Wallet initialized successfully. Current slot:', slot);
+      
+      logger.success('Wallet initialized. Current slot:', slot);
       return true;
     } catch (error) {
-      if (error instanceof Error) {
-        logger.error('Wallet initialization error:', error.message);
-      } else {
-        logger.error('Wallet initialization error:', error);
-      }
+      logger.error('Wallet initialization failed:', error);
+      return false;
+    }
+  }
+
+  // Config validation with proper typing
+  private async validateConfigs() {
+    const configs = this.initializeConfig();
+    
+    if (!configs.primary && !configs.fallback) {
+      throw new Error('No valid RPC configuration found');
+    }
+
+    // Validate URLs
+    if (configs.primary && !this.isValidUrl(configs.primary.url)) {
+      throw new Error('Invalid primary RPC URL');
+    }
+    if (configs.fallback && !this.isValidUrl(configs.fallback.url)) {
+      throw new Error('Invalid fallback RPC URL');
+    }
+
+    return configs;
+  }
+
+  // URL validation helper
+  private isValidUrl(url: string): boolean {
+    try {
+      new URL(url);
+      return url.startsWith('http://') || url.startsWith('https://');
+    } catch {
       return false;
     }
   }
@@ -300,12 +394,15 @@ export class AgentWallet {
     }
   }
 
+  public parsePrivateKey(key: string): Uint8Array {
+    return parsePrivateKey(key);
+  }
 
   // Validation helpers
+  // Public key validation with base58 check
   private isValidPublicKey(address: string): boolean {
     try {
-      new PublicKey(address);
-      return true;
+      return isValidBase58(address) && new PublicKey(address) instanceof PublicKey;
     } catch {
       return false;
     }
@@ -322,6 +419,23 @@ export class AgentWallet {
       typeof data.address === 'string' &&
       this.isValidPublicKey(data.address)
     );
+  }
+
+  // Transaction validation helper
+  private async validateTransaction(
+    transaction: VersionedTransaction | Transaction
+  ): Promise<boolean> {
+    try {
+      const connection = await this.getActiveConnection();
+      const message = 'version' in transaction 
+        ? transaction.message 
+        : transaction.compileMessage();
+        
+      const { value: fee } = await connection.getFeeForMessage(message, 'confirmed');
+      return fee !== null && fee !== undefined && fee <= 1e9; // Max 1 SOL fee
+    } catch {
+      return false;
+    }
   }
 }
 

@@ -1,7 +1,7 @@
 import { AMM_V4, CLMM_PROGRAM_ID, CREATE_CPMM_POOL_PROGRAM } from "@raydium-io/raydium-sdk-v2";
 import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { PublicKey } from '@solana/web3.js';
-import { connection } from "../config";
+import { getConnection } from "../config";
 
 function checkProgramId(id: PublicKey) {
   if (id.equals(AMM_V4)) return 'ammV4'
@@ -11,6 +11,7 @@ function checkProgramId(id: PublicKey) {
 }
 
 export async function formatSwapInfo(txid: string) {
+  const connection = getConnection();
   const txinfo = await connection.getParsedTransaction(txid, { maxSupportedTransactionVersion: 0 })
 
   if (txinfo === null) throw Error('fetch tx info error')
@@ -20,7 +21,7 @@ export async function formatSwapInfo(txid: string) {
   for (let indexIns = 0; indexIns < txinfo.transaction.message.instructions.length; indexIns++) {
     const itemIns = txinfo.transaction.message.instructions[indexIns]
 
-    const innerIns = ((txinfo.meta?.innerInstructions ?? []).find(i => i.index === indexIns)?.instructions ?? []) as any[]
+    const innerIns = ((txinfo.meta?.innerInstructions ?? []).find((i: any) => i.index === indexIns)?.instructions ?? []) as any[]
 
     const type = checkProgramId(itemIns.programId)
 
@@ -32,22 +33,19 @@ export async function formatSwapInfo(txid: string) {
       const transferAmount1 = transfer1.parsed.info.amount ?? transfer1.parsed.info.tokenAmount.amount
       const transferAmount2 = transfer2.parsed.info.amount ?? transfer2.parsed.info.tokenAmount.amount
 
-      if (type === 'ammV4') {
-        // @ts-expect-error accounts array type is not properly inferred from transaction data
+      if (type === 'ammV4' && 'accounts' in itemIns) {
         const swapType = itemIns.accounts[4].toString() === transferSource1 ? 'A to B' : 'B to A'
 
         console.log({
           type,
-          // @ts-expect-error accounts array type is not properly inferred from transaction data
           poolId: itemIns.accounts[1].toString(),
 
           inputAmount: swapType === 'A to B' ? transferAmount1 : transferAmount2,
           outputAmount: swapType === 'A to B' ? transferAmount1 : transferAmount2,
         })
-      } else {
+      } else if ('accounts' in itemIns) {
         console.log({
           type,
-          // @ts-expect-error accounts array type is not properly inferred from transaction data
           poolId: itemIns.accounts[type === 'clmm' ? 2 : 3].toString(),
 
           inputAmount: transferAmount1,
@@ -71,21 +69,19 @@ export async function formatSwapInfo(txid: string) {
         const transferAmount1 = transfer1.parsed.info.amount ?? transfer1.parsed.info.tokenAmount.amount
         const transferAmount2 = transfer2.parsed.info.amount ?? transfer2.parsed.info.tokenAmount.amount
 
-        if (innerType === 'ammV4') {
+        if (innerType === 'ammV4' && 'accounts' in innerItemIns) {
           const swapType = innerItemIns.accounts[4].toString() === transferSource1 ? 'A to B' : 'B to A'
 
           console.log({
             type: innerType,
-           
             poolId: innerItemIns.accounts[1].toString(),
 
             inputAmount: swapType === 'A to B' ? transferAmount1 : transferAmount2,
             outputAmount: swapType === 'A to B' ? transferAmount1 : transferAmount2,
           })
-        } else {
+        } else if ('accounts' in innerItemIns) {
           console.log({
             type: innerType,
-            
             poolId: innerItemIns.accounts[innerType === 'clmm' ? 2 : 3].toString(),
 
             inputAmount: transferAmount1,

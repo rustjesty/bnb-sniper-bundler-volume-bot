@@ -1,6 +1,7 @@
 // src/app/api/raydium/amm/swap/route.ts
-import { getServerSideRaydium } from '@/tools/raydium/server-config';
+//import { getServerSideRaydium } from '@/tools/raydium/server-config';
 import { swap } from '@/tools/raydium/amm/swap';
+import { getServerSideRaydium } from '../config';
 
 export async function POST(req: Request) {
   try {

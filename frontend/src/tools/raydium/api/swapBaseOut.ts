@@ -1,7 +1,7 @@
 import { Transaction, VersionedTransaction, sendAndConfirmTransaction } from '@solana/web3.js'
 import { NATIVE_MINT } from '@solana/spl-token'
 import axios from 'axios'
-import { connection, owner, fetchTokenAccountData } from '../config'
+import { getConnection, owner, fetchTokenAccountData } from '../config'
 import { API_URLS } from '@raydium-io/raydium-sdk-v2'
 
 interface SwapCompute {
@@ -83,7 +83,7 @@ export const apiSwapBaseOut = async () => {
     computeUnitPriceMicroLamports: String(data.data.default.h),
     swapResponse,
     txVersion,
-    wallet: owner.publicKey.toBase58(),
+    wallet: owner().publicKey.toBase58(),
     wrapSol: isInputSol,
     unwrapSol: isOutputSol, // true means output mint receive sol, false means output mint received wsol
     inputAccount: isInputSol ? undefined : inputTokenAcc?.toBase58(),
@@ -98,19 +98,20 @@ export const apiSwapBaseOut = async () => {
   console.log(`total ${allTransactions.length} transactions`, swapTransactions)
 
   let idx = 0
+  const connection = getConnection();
   if (!isV0Tx) {
     for (const tx of allTransactions) {
       console.log(`${++idx} transaction sending...`)
       const transaction = tx as Transaction
-      transaction.sign(owner)
-      const txId = await sendAndConfirmTransaction(connection, transaction, [owner], { skipPreflight: true })
+      transaction.sign(owner())
+      const txId = await sendAndConfirmTransaction(connection, transaction, [owner()], { skipPreflight: true })
       console.log(`${++idx} transaction confirmed, txId: ${txId}`)
     }
   } else {
     for (const tx of allTransactions) {
       idx++
       const transaction = tx as VersionedTransaction
-      transaction.sign([owner])
+      transaction.sign([owner()])
       const txId = await connection.sendTransaction(tx as VersionedTransaction, { skipPreflight: true })
       const { lastValidBlockHeight, blockhash } = await connection.getLatestBlockhash({
         commitment: 'finalized',

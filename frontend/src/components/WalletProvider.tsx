@@ -1,7 +1,7 @@
 'use client';
 
 import { ReactNode, useCallback, useEffect, useState } from 'react';
-import {  ConnectionProvider, WalletProvider as SolanaWalletProvider, useConnection, useWallet } from '@solana/wallet-adapter-react';
+import { ConnectionProvider, WalletProvider as SolanaWalletProvider, useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { WalletModalProvider, WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { PhantomWalletAdapter, SolflareWalletAdapter } from '@solana/wallet-adapter-wallets';
 import { clusterApiUrl, Connection, LAMPORTS_PER_SOL, PublicKey } from '@solana/web3.js';
@@ -41,6 +41,8 @@ export default function WalletProvider({ children }: { children: ReactNode }) {
     error: null,
     isConnecting: false
   });
+
+  const [isReady, setIsReady] = useState(false);
 
   const endpoint = process.env.NEXT_PUBLIC_RPC_URL || clusterApiUrl('mainnet-beta');
   const wallets = [new PhantomWalletAdapter(), new SolflareWalletAdapter()];
@@ -83,8 +85,24 @@ export default function WalletProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    const initialize = async () => {
+      try {
+        // Simulate SDK initialization
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        setIsReady(true);
+      } catch (error) {
+        console.error('Initialization failed:', error);
+      }
+    };
+    
+    initialize();
+  }, []);
+
+  useEffect(() => {
     tryConnect();
   }, [tryConnect]);
+
+  if (!isReady) return <div className="loading-indicator">Initializing JENNA...</div>;
 
   if (state.error) {
     return (

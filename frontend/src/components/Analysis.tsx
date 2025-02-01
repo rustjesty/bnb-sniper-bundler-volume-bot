@@ -3,10 +3,13 @@ import parseTransaction from '@/tools/helius/helius_transaction_parsing';
 import { ScoringWalletKit } from '@/utils/scoringWallet';
 import { PublicKey } from '@solana/web3.js';
 import { SolanaAgentKit } from 'solana-agent-kit/dist/agent';
-import type  ChartConfig  from './Chart';
+import type ChartConfig from './Chart';
+// Import our safe utilities
+import { safePublicKey, isValidBase58 } from '@/utils/base58';
+import logger from '@/utils/logger';
 
 interface AnalysisScore {
-  category: string;
+  category: string; 
   score: number;
   description: string;
 }
@@ -80,76 +83,44 @@ const Analysis: React.FC<AnalysisProps> = ({
     setError(null);
 
     try {
-      // Initialize scoring wallet
-      const wallet = new PublicKey(walletAddress);
-      await ScoringWalletKit.fetchTx(wallet, 1000); // Analyze last 1000 transactions
+      // Validate wallet address
+      if (!isValidBase58(walletAddress)) {
+        throw new Error('Invalid wallet address format');
+      }
 
-      // Get scores
-      const analysisScores: AnalysisScore[] = [
-        {
-          category: 'Transaction Frequency',
-          score: ScoringWalletKit.calcTxFreq(),
-          description: 'Measures trading activity frequency'
-        },
-        {
-          category: 'Volume',
-          score: ScoringWalletKit.calcVol(),
-          description: 'Trading volume score'
-        },
-        {
-          category: 'Profitability',
-          score: ScoringWalletKit.calcProfitability(),
-          description: 'Success rate of trades'
-        },
-        {
-          category: 'DEX Diversity',
-          score: ScoringWalletKit.calcDexDiversity(),
-          description: 'Usage of different DEXes'
-        },
-        {
-          category: 'Risk Profile',
-          score: ScoringWalletKit.calcRiskContract(),
-          description: 'Risk assessment based on trading patterns'
-        },
-        {
-          category: 'Final Score',
-          score: ScoringWalletKit.calcFinalScore(),
-          description: 'Overall performance score'
-        }
-      ];
+      // Safely create PublicKey
+      const publicKey = safePublicKey(walletAddress);
+      if (!publicKey) {
+        throw new Error('Invalid wallet address');
+      }
 
+      // Initialize ScoringWalletKit with validated address
+      try {
+        await ScoringWalletKit.fetchTx(publicKey, 1000);
+      } catch (error) {
+        logger.error('ScoringWalletKit error:', error);
+        throw new Error('Failed to fetch wallet transactions');
+      }
+
+      // Get scores with error handling
+      const analysisScores: AnalysisScore[] = await getSafeScores();
       setScores(analysisScores);
 
-      // Parse transactions
-      const privateKey = process.env.SOLANA_PRIVATE_KEY || '';
-      const rpcUrl = process.env.SOLANA_RPC_URL || '';
-      const openaiApiKey = process.env.OPENAI_API_KEY || '';
-      const agent = new SolanaAgentKit(privateKey, rpcUrl, openaiApiKey); // Initialize SolanaAgentKit instance with required arguments
+      // Parse transactions safely
+      const agent = await createSafeAgent();
+      if (!agent) {
+        throw new Error('Failed to initialize agent');
+      }
+
       const txs = await parseTransaction(agent, walletAddress);
-
-      // Calculate metrics
-      const metrics: WalletMetrics = {
-        transactionCount: txs.length,
-        uniqueDexes: new Set(txs.map((tx: { dex: any; }) => tx.dex)).size,
-        tradingVolume: txs.reduce((sum: any, tx: { volume: any; }) => sum + (tx.volume || 0), 0),
-        profitability: txs.filter((tx: { profit: number; }) => tx.profit > 0).length / txs.length * 100,
-        avgTransactionSize: txs.reduce((sum: any, tx: { volume: any; }) => sum + (tx.volume || 0), 0) / txs.length
-      };
-
+      
+      // Calculate metrics with validation
+      const metrics = calculateSafeMetrics(txs);
       setMetrics(metrics);
 
-      // Calculate transaction types
-      const typeMap = new Map<string, TransactionType>();
-      txs.forEach((tx: { type: string; volume: any; }) => {
-        const existing = typeMap.get(tx.type) || { type: tx.type, count: 0, volume: 0 };
-        typeMap.set(tx.type, {
-          ...existing,
-          count: existing.count + 1,
-          volume: existing.volume + (tx.volume || 0)
-        });
-      });
-
-      setTransactionTypes(Array.from(typeMap.values()));
+      // Calculate transaction types safely
+      const types = calculateSafeTransactionTypes(txs);
+      setTransactionTypes(types);
 
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Analysis failed';
@@ -157,6 +128,113 @@ const Analysis: React.FC<AnalysisProps> = ({
       onError?.(error instanceof Error ? error : new Error(message));
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Safe helper functions
+  const getSafeScores = async (): Promise<AnalysisScore[]> => {
+    try {
+      return [
+        {
+          category: 'Transaction Frequency',
+          score: ScoringWalletKit.calcTxFreq() || 0,
+          description: 'Measures trading activity frequency'
+        },
+        {
+          category: 'Volume',
+          score: ScoringWalletKit.calcVol() || 0,
+          description: 'Trading volume score'
+        },
+        {
+          category: 'Profitability',
+          score: ScoringWalletKit.calcProfitability() || 0,
+          description: 'Success rate of trades'
+        },
+        {
+          category: 'DEX Diversity',
+          score: ScoringWalletKit.calcDexDiversity() || 0,
+          description: 'Usage of different DEXes'
+        },
+        {
+          category: 'Risk Profile',
+          score: ScoringWalletKit.calcRiskContract() || 0,
+          description: 'Risk assessment based on trading patterns'
+        },
+        {
+          category: 'Final Score',
+          score: ScoringWalletKit.calcFinalScore() || 0,
+          description: 'Overall performance score'
+        }
+      ];
+    } catch (error) {
+      logger.error('Error calculating scores:', error);
+      return [];
+    }
+  };
+
+  const createSafeAgent = async () => {
+    try {
+      const privateKey = process.env.SOLANA_PRIVATE_KEY;
+      const rpcUrl = process.env.SOLANA_RPC_URL;
+      const openaiApiKey = process.env.OPENAI_API_KEY;
+
+      if (!privateKey || !rpcUrl || !openaiApiKey) {
+        throw new Error('Missing required environment variables');
+      }
+
+      if (!isValidBase58(privateKey)) {
+        throw new Error('Invalid private key format');
+      }
+
+      return new SolanaAgentKit(privateKey, rpcUrl, openaiApiKey);
+    } catch (error) {
+      logger.error('Error creating agent:', error);
+      return null;
+    }
+  };
+
+  const calculateSafeMetrics = (txs: any[]): WalletMetrics => {
+    try {
+      return {
+        transactionCount: txs.length,
+        uniqueDexes: new Set(txs.map(tx => tx.dex).filter(Boolean)).size,
+        tradingVolume: txs.reduce((sum, tx) => sum + (Number(tx.volume) || 0), 0),
+        profitability: txs.filter(tx => Number(tx.profit) > 0).length / txs.length * 100,
+        avgTransactionSize: txs.length ? 
+          txs.reduce((sum, tx) => sum + (Number(tx.volume) || 0), 0) / txs.length : 
+          0
+      };
+    } catch (error) {
+      logger.error('Error calculating metrics:', error);
+      return {
+        transactionCount: 0,
+        uniqueDexes: 0,
+        tradingVolume: 0,
+        profitability: 0,
+        avgTransactionSize: 0
+      };
+    }
+  };
+
+  const calculateSafeTransactionTypes = (txs: any[]): TransactionType[] => {
+    try {
+      const typeMap = new Map<string, TransactionType>();
+      
+      txs.forEach(tx => {
+        const type = tx.type || 'unknown';
+        const existing = typeMap.get(type) || { type, count: 0, volume: 0 };
+        
+        typeMap.set(type, {
+          ...existing,
+          count: existing.count + 1,
+          volume: existing.volume + (Number(tx.volume) || 0)
+        });
+      });
+
+      return Array.from(typeMap.values());
+    } catch (error) {
+      logger.error('Error calculating transaction types:', error);
+      return [];
     }
   };
 
