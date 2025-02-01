@@ -1,4 +1,8 @@
-import { validatePrivateKey } from "@/tools/raydium/serverConfig";
+const validatePrivateKey = (key: string) => {
+  if (!key.match(/^0x[0-9a-fA-F]{64}$/)) {
+    throw new Error('Invalid private key format');
+  }
+};
 
 export const validateEnvironment = () => {
   const requiredVars = [

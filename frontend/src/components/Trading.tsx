@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Connection, PublicKey } from '@solana/web3.js';
-import SwapInterface from './SwapInterface';
+
 import { getSwapQuote, executeSwap, fetchJupiterTokens } from '@/utils/jup';
 import logger from '@/utils/logger';
 import dynamic from 'next/dynamic';
@@ -167,13 +167,7 @@ export default function Trading() {
 
   return (
     <div className="space-y-6">
-      <SwapInterface
-        tokens={tokens}
-        onSwap={handleSwap}
-        loading={state.loading}
-        error={state.error} visible={false} onClose={function (): void {
-          throw new Error('Function not implemented.');
-        } }      />
+fa      {/* Removed SwapInterface component */}
 
       {recentTrades.length > 0 && (
         <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm">

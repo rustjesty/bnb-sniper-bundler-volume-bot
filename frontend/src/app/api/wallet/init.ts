@@ -1,125 +1,165 @@
-import { NextApiRequest, NextApiResponse } from 'next';
-import { parsePrivateKey } from '../../../utils/keys';
-import { RaydiumErrorCode } from '@/tools/raydium/core/types';
-import { EnvironmentValidator } from '@/tools/raydium/validation';
-import { ValidationError } from '@lifi/sdk';
+// src/app/api/wallet/init/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { parsePrivateKey } from '@/utils/keys';
+
+// Error Types
+enum RaydiumErrorCode {
+  INVALID_PARAMETERS = 'INVALID_PARAMETERS',
+  INITIALIZATION_FAILED = 'INITIALIZATION_FAILED',
+  CONNECTION_ERROR = 'CONNECTION_ERROR',
+  VALIDATION_ERROR = 'VALIDATION_ERROR'
+}
+
+interface RaydiumErrorData {
+  name: string;
+  message: string;
+  code: RaydiumErrorCode;
+  details?: any;
+}
 
 class RaydiumError extends Error {
-  constructor(public name: string, public message: string, public code: RaydiumErrorCode, public details: any) {
+  name: string;
+  code: RaydiumErrorCode;
+  details?: any;
+
+  constructor({ name, message, code, details }: RaydiumErrorData) {
     super(message);
+    this.name = name;
+    this.code = code;
+    this.details = details;
   }
+
   toJSON() {
-    return { name: this.name, message: this.message, code: this.code, details: this.details };
+    return {
+      name: this.name,
+      message: this.message,
+      code: this.code,
+      details: this.details
+    };
+  }
+
+  static create(data: RaydiumErrorData): RaydiumError {
+    return new RaydiumError(data);
   }
 }
 
-
+// Rate limiting
 const RATE_LIMIT_WINDOW = 60000; // 1 minute
 const MAX_REQUESTS = 10;
 const requests = new Map<string, number[]>();
 
-const getClientIp = (req: NextApiRequest): string => {
-  const forwarded = req.headers['x-forwarded-for'];
-  const ip = forwarded 
-    ? Array.isArray(forwarded) 
-      ? forwarded[0] 
-      : forwarded.split(',')[0]
-    : req.socket.remoteAddress || 'unknown';
-  return ip;
+// Environment validation
+function validateEnvironment() {
+  const requiredEnvVars = [
+    'SOLANA_PRIVATE_KEY',
+    'NEXT_PUBLIC_RPC_URL',
+    'NEXT_PUBLIC_NETWORK'
+  ];
+
+  const missing = requiredEnvVars.filter(key => !process.env[key]);
+  if (missing.length > 0) {
+    throw RaydiumError.create({
+      name: 'EnvironmentError',
+      message: `Missing environment variables: ${missing.join(', ')}`,
+      code: RaydiumErrorCode.VALIDATION_ERROR
+    });
+  }
+}
+
+// Security middleware
+async function validateRequest(req: NextRequest): Promise<void> {
+  // Check method
+  if (req.method !== 'GET') {
+    throw RaydiumError.create({
+      name: 'ValidationError',
+      message: 'Only GET method is allowed',
+      code: RaydiumErrorCode.VALIDATION_ERROR
+    });
+  }
+
+  // Rate limiting
+  const ip = req.headers.get('x-forwarded-for') || 
+             req.headers.get('x-real-ip') || 
+             'unknown';
+
+  if (ip !== 'unknown') {
+    const now = Date.now();
+    const clientRequests = requests.get(ip) || [];
+    const recentRequests = clientRequests.filter(time => now - time < RATE_LIMIT_WINDOW);
+
+    if (recentRequests.length >= MAX_REQUESTS) {
+      throw RaydiumError.create({
+        name: 'RateLimitError',
+        message: 'Too many requests',
+        code: RaydiumErrorCode.VALIDATION_ERROR
+      });
+    }
+
+    requests.set(ip, [...recentRequests, now]);
+  }
+}
+
+// Error status mapping
+const ERROR_STATUS_MAP: Record<RaydiumErrorCode, number> = {
+  [RaydiumErrorCode.INVALID_PARAMETERS]: 400,
+  [RaydiumErrorCode.INITIALIZATION_FAILED]: 500,
+  [RaydiumErrorCode.CONNECTION_ERROR]: 503,
+  [RaydiumErrorCode.VALIDATION_ERROR]: 400
 };
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse
-) {
+function getErrorStatus(code: RaydiumErrorCode): number {
+  return ERROR_STATUS_MAP[code] || 500;
+}
+
+export async function GET(request: NextRequest) {
   try {
-    // Validate server environment and operation context
-    EnvironmentValidator.validateServerEnv();
-    validateOperation('wallet-init', 'server');
+    // Validate environment
+    validateEnvironment();
 
-    securityMiddleware(req, res, async () => {
-      if (req.method !== 'GET') {
-        throw new ValidationError('GET method required');
-      }
+    // Validate request
+    await validateRequest(request);
 
-      const clientIp = getClientIp(req);
+    // Process private key
+    const privateKey = process.env.SOLANA_PRIVATE_KEY;
+    if (!privateKey) {
+      throw RaydiumError.create({
+        name: 'ConfigError',
+        message: 'Missing SOLANA_PRIVATE_KEY',
+        code: RaydiumErrorCode.VALIDATION_ERROR
+      });
+    }
 
-      // Basic rate limiting
-      if (clientIp !== 'unknown') {
-        const now = Date.now();
-        const clientRequests = requests.get(clientIp) || [];
-        const recentRequests = clientRequests.filter(time => now - time < RATE_LIMIT_WINDOW);
-
-        if (recentRequests.length >= MAX_REQUESTS) {
-          return res.status(429).json({ message: 'Too many requests' });
-        }
-
-        requests.set(clientIp, [...recentRequests, now]);
-      }
-
-      // Environment validation
-      const privateKey = process.env.SOLANA_PRIVATE_KEY;
-      if (!privateKey) {
-        throw new Error('Missing SOLANA_PRIVATE_KEY');
-      }
-
-      try {
-        const secretKey = parsePrivateKey(privateKey);
-        return res.status(200).json({
+    try {
+      const secretKey = parsePrivateKey(privateKey);
+      return NextResponse.json({
+        status: 'success',
+        data: {
           keypair: Array.from(secretKey),
-          timestamp: Date.now()
-        });
-      } catch (error) {
-        throw createRaydiumError({
-          name: 'WalletError',
-          message: 'Failed to process private key',
-          code: RaydiumErrorCode.INVALID_PARAMETERS,
-          details: error
-        });
-      }
-    });
+          timestamp: Date.now(),
+          network: process.env.NEXT_PUBLIC_NETWORK
+        }
+      });
+    } catch (error) {
+      throw RaydiumError.create({
+        name: 'WalletError',
+        message: 'Failed to process private key',
+        code: RaydiumErrorCode.INVALID_PARAMETERS,
+        details: error
+      });
+    }
   } catch (error) {
-    const raydiumError = error instanceof RaydiumError 
-      ? error 
-      : createRaydiumError({
+    const raydiumError = error instanceof RaydiumError
+      ? error
+      : RaydiumError.create({
           name: 'InitializationError',
           message: 'Wallet initialization failed',
           code: RaydiumErrorCode.INITIALIZATION_FAILED,
           details: error
         });
 
-    return res.status(getErrorStatus(raydiumError.code)).json(raydiumError.toJSON());
+    return NextResponse.json(
+      raydiumError.toJSON(),
+      { status: getErrorStatus(raydiumError.code) }
+    );
   }
 }
-
-// Helper to map error codes to HTTP status codes
-function getErrorStatus(code: RaydiumErrorCode): number {
-  const statusMap: Record<RaydiumErrorCode, number> = {
-    [RaydiumErrorCode.INVALID_PARAMETERS]: 400,
-    [RaydiumErrorCode.INITIALIZATION_FAILED]: 500,
-    [RaydiumErrorCode.CONNECTION_ERROR]: 503,
-  };
-  return statusMap[code] || 500;
-}
-
-function validateOperation(arg0: string, arg1: string) {
-  throw new Error('Function not implemented.');
-}
-
-function securityMiddleware(req: NextApiRequest, res: NextApiResponse, arg2: () => Promise<void>) {
-  throw new Error('Function not implemented.');
-}
-
-// Define the createRaydiumError function
-function createRaydiumError({ name, message, code, details }: Omit<RaydiumError, 'toJSON'>): RaydiumError {
-  return {
-    name,
-    message,
-    code,
-    details,
-    toJSON() {
-      return { name, message, code, details };
-    }
-  };
-}
-

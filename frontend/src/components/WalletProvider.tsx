@@ -12,7 +12,7 @@ import { WalletError } from '@solana/wallet-adapter-base';
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 2000;
 const CONNECTION_TIMEOUT = 30000;
-
+  
 interface WalletProviderState {
   retryCount: number;
   error: Error | null;

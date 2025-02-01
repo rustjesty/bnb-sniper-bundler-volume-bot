@@ -5,7 +5,7 @@ import { Dialog } from '@headlessui/react';
 
 interface ApiKeyModalProps {
   onApiKeySubmit: (apiKey: string) => void;
-  isOpen: boolean;
+  isOpen: boolean; 
   onClose: () => void;
 }
 

@@ -11,7 +11,7 @@ import bs58 from 'bs58';
 
 // Components
 import ApiKeyModal from '@/components/ApiKeyModal'; 
-import Chat, { ChatProps } from '@/components/Chat';
+import Chat from '@/components/Chat';
 import { agentWallet } from '@/utils/wallet';
  
 // Constants
@@ -47,7 +47,7 @@ export default function Home() {
   // Check API key and initialize services
   useEffect(() => {
     const initializeServices = async () => {
-      try {
+      try { 
         setIsLoading(true);
 
         // Check stored API key with improved validation

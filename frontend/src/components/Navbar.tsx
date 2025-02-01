@@ -16,18 +16,7 @@ export default function Navbar() {
             </Link>
             
             <div className="ml-10 hidden space-x-8 lg:block">
-              <Link href="/" className="text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white">
-                Home
-              </Link>
-              <Link href="/portfolio" className="text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white">
-                Portfolio
-              </Link>
-              <Link href="/trading" className="text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white">
-                Trading
-              </Link>
-              <Link href="/analysis" className="text-gray-600 hover:text-gray-800 dark:text-gray-300 dark:hover:text-white">
-                Analysis
-              </Link>
+              {/* Removed Home link */}
             </div>
           </div>
 

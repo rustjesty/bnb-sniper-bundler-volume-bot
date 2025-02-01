@@ -8,7 +8,7 @@ interface WalletBalance {
   balance: number;
   address: string;
 } 
-
+  
 interface TransactionResult {
   signature: string;
   status: 'success' | 'error';

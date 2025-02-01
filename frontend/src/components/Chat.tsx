@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import Image from 'next/image';
 import { useWallet } from '@solana/wallet-adapter-react';
-import  SwapInterface  from '@/components/SwapInterface';
+
 import { streamCompletion, Message } from '@/utils/groq';
 import { IconArrowRight, IconBolt, IconCoin, IconWallet, IconMicrophone } from './Icon';
 
@@ -212,12 +212,20 @@ const Chat: React.FC<ChatProps> = ({ messages, onSendMessage, isStreaming }) => 
       </div>
 
       {swapModalVisible && (
-        <SwapInterface
-          visible={swapModalVisible}
-          onClose={() => setSwapModalVisible(false)}
-          tokens={[]} // Pass the tokens array here
-          onSwap={async () => ''} // Provide a dummy onSwap function
-        />
+        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-lg">
+            <h2 className="text-xl font-bold mb-4">Swap Tokens</h2>
+            <p>From: {swapTokens?.from}</p>
+            <p>To: {swapTokens?.to}</p>
+            <p>Amount: {swapTokens?.amount}</p>
+            <button
+              onClick={() => setSwapModalVisible(false)}
+              className="mt-4 px-4 py-2 bg-purple-500 text-white rounded-lg"
+            >
+              Close
+            </button>
+          </div>
+        </div>
       )}
 
       <div className="flex-0 p-4 border-t dark:border-gray-800 bg-gray-50 dark:bg-gray-900">

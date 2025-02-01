@@ -37,7 +37,7 @@ import { openbookCreateMarket } from '@/tools/openbook/openbook_create_market';
 import { launchPumpFunToken } from '@/tools/pumpfun/launch_pumpfun_token';
 import { swapTool } from '@/tools/swap';
 import { CHAT_TEMPLATE, CONDENSE_QUESTION_TEMPLATE, QA_TEMPLATE, REPHRASE_TEMPLATE } from './RetrievalPrompts';
-import { AmmInfo, AmmMarket, AmmOps, AmmPool, ClmmDecrease, ClmmFarm, ClmmHarvest, ClmmIncrease, ClmmMarketMaker, ClmmNewPosition, ClmmPool, ClmmPoolInfo, ClmmRewards, FarmStake } from '@/tools/raydium';
+//import { AmmInfo, AmmMarket, AmmOps, AmmPool, ClmmDecrease, ClmmFarm, ClmmHarvest, ClmmIncrease, ClmmMarketMaker, ClmmNewPosition, ClmmPool, ClmmPoolInfo, ClmmRewards, FarmStake } from '@/raydium';
 import { geckoTerminalAPI } from '@/tools/geckoterminal';
 import { MarketDataHelper } from '@/tools/geckoterminal/marketData';
 import { tryBase58Decode, isValidBase58, safePublicKey } from '@/utils/base58';
@@ -1802,107 +1802,7 @@ export async function streamCompletion(
                 onChunk(`Transaction ID: ${result} \n`);
                 break;
 
-              case 'createAmmPool':
-                try {
-                  const { baseMint, quoteMint, baseAmount, quoteAmount } = JSON.parse(functionArgs);
-                  const result = await AmmPool.createAmmPool() as unknown as { poolId: string; txId: string };
-                  onChunk(`\nAMM Pool Created:\nPool ID: ${result.poolId}\nTransaction: ${result.txId}\n`);
-                } catch (error) {
-                  onChunk(`\nFailed to create AMM pool: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
-                }
-                break;
-            
-              case 'addLiquidity': 
-                try {
-                  const { poolId, baseAmount, quoteAmount } = JSON.parse(functionArgs);
-                  const result = await AmmOps.addLiquidity() as { txId: string };
-                  onChunk(`\nLiquidity Added:\nTransaction: ${result.txId}\n`);
-                } catch (error) {
-                  onChunk(`\nFailed to add liquidity: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
-                }
-                break;
-            
-              case 'createClmmPool':
-                try {
-                  const { mint1, mint2, initialPrice } = JSON.parse(functionArgs);
-                  const result = await ClmmPool.createPool() as { poolId: string; txId: string };
-                  onChunk(`\nCLMM Pool Created:\nPool ID: ${result.poolId}\nTransaction: ${result.txId}\n`);
-                } catch (error) {
-                  onChunk(`\nFailed to create CLMM pool: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
-                }
-                break;
-            
-              case 'manageFarmRewards':
-                try {
-                  const { poolId, rewardMint, rewardRate, duration } = JSON.parse(functionArgs);
-                  await ClmmRewards.setFarmRewards();
-                  onChunk(`\nFarm Rewards Updated Successfully\n`);
-                } catch (error) {
-                  onChunk(`\nFailed to manage farm rewards: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
-                }
-                break;
-            
-              case 'harvestRewards':
-                try {
-                  const { poolId, positionId } = JSON.parse(functionArgs);
-                  const result = await ClmmHarvest.harvestAllRewards();
-                  onChunk(`\nRewards Harvested:\nTransaction: ${result}\n`);
-                } catch (error) {
-                  onChunk(`\nFailed to harvest rewards: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
-                }
-                break;
-            
-              case 'getRaydiumPoolInfo':
-                try {
-                  const { poolType } = JSON.parse(functionArgs);
-                  let info;
-                  switch (poolType) {
-                    case 'AMM':
-                      info = await AmmInfo.fetchRpcPoolInfo();
-                      break;
-                    case 'CLMM':
-                      info = await ClmmPoolInfo.fetchRpcPoolInfo();
-                      break;
-                    default:
-                      throw new Error('Unsupported pool type');
-                  }
-                  onChunk(`\nPool Information:\n${JSON.stringify(info, null, 2)}\n`);
-                } catch (error) {
-                  onChunk(`\nFailed to get pool info: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
-                }
-                break;
-
-              case 'createMarket':
-                try {
-                  const { baseMint, quoteMint, lotSize, tickSize } = JSON.parse(functionArgs);
-                  const result = await AmmMarket.createMarket() as { marketId: string; txId: string };
-                  onChunk(`\nMarket Created:\nMarket ID: ${result.marketId}\nTransaction: ${result.txId}\n`);
-                } catch (error) {
-                  onChunk(`\nFailed to create market: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
-                }
-                break;
-            
-              case 'createClmmPosition':
-                try {
-                  const { poolId, tickLower, tickUpper, amount } = JSON.parse(functionArgs);
-                  const result = await ClmmNewPosition.createPosition() as { positionId: string; txId: string };
-                  onChunk(`\nPosition Created:\nPosition ID: ${result.positionId}\nTransaction: ${result.txId}\n`);
-                } catch (error) {
-                  onChunk(`\nFailed to create position: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
-                }
-                break;
-            
-              case 'modifyClmmPosition':
-                try {
-                  const { operation } = JSON.parse(functionArgs);
-                  const result = operation === 'increase' 
-                    ? await ClmmIncrease.increaseLiquidity()
-                    : await ClmmDecrease.decreaseLiquidity();
-                  onChunk(`\nPosition Modified:\nTransaction: ${result}\n`);
-                } catch (error) {
-                  onChunk(`\nFailed to modify position: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
-                }
-                break;
+              
             
               case 'createFarm':
                 try {
@@ -1913,28 +1813,7 @@ export async function streamCompletion(
                 }
                 break;
             
-              case 'stakeFarm':
-                try {
-                  const { farmId, amount } = JSON.parse(functionArgs);
-                  const result = await FarmStake.stake() as { txId: string };
-                  onChunk(`\nStake Successful:\nTransaction: ${result.txId}\n`);
-                } catch (error) {
-                  onChunk(`\nFailed to stake: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
-                }
-                break;
-            
-              case 'fetchMarketMaker':
-                try {
-                  const { poolId, positionRange } = JSON.parse(functionArgs);
-                  const result = await ClmmMarketMaker.getInfo({
-                    poolId: new PublicKey(poolId),
-                    positionRange
-                  });
-                  onChunk(`\nMarket Maker Info:\n${JSON.stringify(result, null, 2)}\n`);
-                } catch (error) {
-                  onChunk(`\nFailed to fetch market maker info: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
-                }
-                break;
+             
 
               case 'executeSwap':
                 try {
