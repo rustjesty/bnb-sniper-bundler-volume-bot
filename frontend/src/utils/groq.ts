@@ -67,10 +67,10 @@ interface PromptConfig {
 }
 
 export interface Message {
-  role: 'system' | 'user' | 'assistant' | 'function';
+  name: any;
+  function_call: any;
+  role: 'user' | 'assistant' | 'function';
   content: string;
-  name?: string; 
-  function_call?: any;
 }
 
 // Configurations
@@ -1035,11 +1035,10 @@ export async function retrieveAndFormatDocuments(
 // Main streaming completion function
 export async function streamCompletion(
   messages: Message[],
-  onChunk: (chunk: string) => void,
-  providedApiKey?: string
+  onChunk: (chunk: string) => void
 ): Promise<void> {
-  const apiKey = providedApiKey || localStorage.getItem('jenna_api_key');
-  if (!apiKey) throw new Error('API key not found');
+  const apiKey = process.env.NEXT_PUBLIC_GROQ_API_KEY;
+  if (!apiKey) throw new Error('Server configuration error: NEXT_PUBLIC_GROQ_API_KEY not found');
 
   const groq = createGroqClient(apiKey);
   let retries = 0;
@@ -1896,7 +1895,7 @@ export async function botCompletion(
   messages: Message[],
   providedApiKey?: string
 ): Promise<string> {
-  const apiKey = providedApiKey;
+  const apiKey = providedApiKey || process.env.NEXT_PUBLIC_GROQ_API_KEY;
   if (!apiKey) throw new Error('API key not found');
 
   const groq = createGroqClient(apiKey);
