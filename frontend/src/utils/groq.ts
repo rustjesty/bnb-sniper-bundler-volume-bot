@@ -2,6 +2,7 @@
 import { Groq } from 'groq-sdk';
 import { LAMPORTS_PER_SOL, PublicKey, Connection, Transaction } from '@solana/web3.js';
 import { SolanaAgentKit } from 'solana-agent-kit';
+import base58 from 'bs58';
 
 // Local utility imports
 import { getSolanaPrice, getTrendingSolanaTokens } from './coingecko';
@@ -1048,7 +1049,7 @@ export async function retrieveAndFormatDocuments(
 
 // Main streaming completion function
 export async function streamCompletion(
-  messages: Message[],
+  messages: Message[], 
   onChunk: (chunk: string) => void
 ): Promise<void> {
   const apiKey = process.env.NEXT_PUBLIC_GROQ_API_KEY;
@@ -1057,9 +1058,18 @@ export async function streamCompletion(
   const groq = createGroqClient(apiKey);
   let retries = 0;
 
+  const privateKey = process.env.SOLANA_PRIVATE_KEY!;
+  let decodedPrivateKey;
+
+  try {
+    decodedPrivateKey = base58.decode(privateKey);
+  } catch (error) {
+    throw new Error('Invalid Solana private key format. Please ensure it is base58 encoded.');
+  }
+
   // Create an instance of SolanaAgentKit
   const agent = new SolanaAgentKit(
-    process.env.SOLANA_PRIVATE_KEY!,  // Provide the private key
+    base58.encode(decodedPrivateKey),  // Convert decoded private key back to base58 string
     'https://api.mainnet-beta.solana.com', // Provide the RPC URL
     apiKey // Provide the OpenAI API key
   );

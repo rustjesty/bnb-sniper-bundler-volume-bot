@@ -1,5 +1,6 @@
 
 
+import { JUP_REFERRAL_ADDRESS } from "@/config/constants";
 import { getMint } from "@solana/spl-token";
 import { VersionedTransaction, PublicKey } from "@solana/web3.js";
 import { SolanaAgentKit } from "solana-agent-kit";
@@ -16,7 +17,7 @@ declare module "solana-agent-kit" {
         options: AgentOptions;
     }
 }
-import { JUP_REFERRAL_ADDRESS } from "../../../../src/config/constants";
+
 
 /**
  * Swap tokens using Jupiter Exchange

@@ -1,47 +1,91 @@
+import { SOLANA_CONFIG, CHAT_CONFIG } from "./constants";
+
+
+// Type definitions
+interface Config {
+  SOLANA: {
+    RPC_URL: string;
+    NETWORK: string;
+    PUBLIC_KEY: string;
+    TOKEN_SETTINGS: {
+      NAME: string;
+      SYMBOL: string;
+      DECIMALS: number;
+      SUPPLY: number;
+      ADDRESS: string;
+    };
+    TRADING: {
+      MIN_CONFIDENCE: number;
+      BASE_AMOUNT: number;
+      SLIPPAGE: number;
+    };
+  };
+  AI: {
+    GROQ: {
+      API_KEY: string;
+      MODEL: string;
+      MAX_TOKENS: number;
+      DEFAULT_TEMPERATURE: number;
+      MAX_RETRIES: number;
+      RETRY_DELAY: number;
+    };
+  };
+  AUTOMATION: {
+    CONTENT_GENERATION_INTERVAL: number;
+    MARKET_MONITORING_INTERVAL: number;
+    COMMUNITY_ENGAGEMENT_INTERVAL: number;
+    TWEET_INTERVAL: number;
+  };
+}
+
 // Simple function to get environment variables with defaults
 const getEnvVar = (key: string, defaultValue: string = '') => {
-    if (typeof window === 'undefined') {
-      return process.env[key] || defaultValue;
-    }
-    return (window as any)?.__ENV?.[key] || process.env[key] || defaultValue;
-  };
-  
-  export const CONFIG = {
-    SOLANA: {
-      NETWORK: getEnvVar('NEXT_PUBLIC_SOLANA_NETWORK', 'mainnet-beta'),
-      RPC_URL: getEnvVar('NEXT_PUBLIC_RPC_URL', 'https://api.mainnet-beta.solana.com'),
-      PUBLIC_KEY: getEnvVar('NEXT_PUBLIC_PUBLIC_KEY', ''),
-      TOKEN_SETTINGS: {
-        NAME: 'JENNA',
-        SYMBOL: 'JENNA',
-        DECIMALS: 9,
-        SUPPLY: 100000000,
-        ADDRESS: '8hVzPgFopqEQmNNoghr5WbPY1LEjW8GzgbLRwuwHpump'
-      }
+  if (typeof window === 'undefined') {
+    return process.env[key] || defaultValue;
+  }
+  return (window as any)?.__ENV?.[key] || process.env[key] || defaultValue;
+};
+
+// Configuration object
+export const CONFIG: Config = {
+  SOLANA: {
+    NETWORK: SOLANA_CONFIG.NETWORK,
+    RPC_URL: SOLANA_CONFIG.RPC_URL,
+    PUBLIC_KEY: SOLANA_CONFIG.PUBLIC_KEY || '',
+    TOKEN_SETTINGS: {
+      NAME: 'JENNA',
+      SYMBOL: 'JENNA',
+      DECIMALS: 9,
+      SUPPLY: 100000000,
+      ADDRESS: '8hVzPgFopqEQmNNoghr5WbPY1LEjW8GzgbLRwuwHpump'
     },
-  
-    AI: {
-      GROQ: {
-        API_KEY: getEnvVar('NEXT_PUBLIC_GROQ_API_KEY', ''),
-        MODEL: getEnvVar('NEXT_PUBLIC_GROQ_MODEL', 'mixtral-8x7b-32768'),
-        MAX_TOKENS: parseInt(getEnvVar('NEXT_PUBLIC_GROQ_MAX_TOKENS', '1000')),
-        DEFAULT_TEMPERATURE: parseFloat(getEnvVar('NEXT_PUBLIC_GROQ_TEMPERATURE', '0.7')),
-        MAX_RETRIES: parseInt(getEnvVar('NEXT_PUBLIC_GROQ_MAX_RETRIES', '3')),
-        RETRY_DELAY: parseInt(getEnvVar('NEXT_PUBLIC_GROQ_RETRY_DELAY', '1000'))
-      }
+    TRADING: {
+      MIN_CONFIDENCE: 0.7,
+      BASE_AMOUNT: 0.1,
+      SLIPPAGE: 50, // 0.5% in basis points
     },
-  
-    AUTOMATION: {
-      CONTENT_GENERATION_INTERVAL: 120000,  // 2 min
-      MARKET_MONITORING_INTERVAL: 30000,    // 30 sec
-      COMMUNITY_ENGAGEMENT_INTERVAL: 180000, // 3 min
-      TWEET_INTERVAL: 300000                // 5 min
-    }
-  };
-  
-  // Export individual sections
-  export const {
-    SOLANA,
-    AI,
-    AUTOMATION
-  } = CONFIG;
+  },
+  AI: {
+    GROQ: {
+      API_KEY: getEnvVar('NEXT_PUBLIC_GROQ_API_KEY', ''),
+      MODEL: CHAT_CONFIG.MODEL,
+      MAX_TOKENS: CHAT_CONFIG.MAX_TOKENS,
+      DEFAULT_TEMPERATURE: CHAT_CONFIG.TEMPERATURE,
+      MAX_RETRIES: parseInt(getEnvVar('NEXT_PUBLIC_GROQ_MAX_RETRIES', '3')),
+      RETRY_DELAY: parseInt(getEnvVar('NEXT_PUBLIC_GROQ_RETRY_DELAY', '1000'))
+    },
+  },
+  AUTOMATION: {
+    CONTENT_GENERATION_INTERVAL: 1800000, // 30 minutes
+    MARKET_MONITORING_INTERVAL: 300000,   // 5 minutes
+    COMMUNITY_ENGAGEMENT_INTERVAL: 3600000, // 1 hour
+    TWEET_INTERVAL: 300000                // 5 min
+  },
+};
+
+// Export individual sections
+export const {
+  SOLANA,
+  AI,
+  AUTOMATION
+} = CONFIG;

@@ -1,7 +1,6 @@
-import React, { useRef } from 'react';
-import { IconArrowRight, IconMicrophone } from '../Icon';
+import React, { ChangeEvent, FormEvent, useRef } from 'react';
 import { InputAreaProps } from './types';
-
+import { IconArrowRight, IconMicrophone } from '@/components/Icon';
 
 export const InputArea: React.FC<InputAreaProps> = ({
   input,
@@ -9,9 +8,19 @@ export const InputArea: React.FC<InputAreaProps> = ({
   onSubmit,
   isStreaming,
   isListening,
-  toggleListening
+  toggleListening,
+  value,
+  onChange,
+  onSend
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      onSend(e as unknown as FormEvent);
+    }
+  };
 
   return (
     <div className="flex-0 p-4 border-t dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
@@ -21,14 +30,9 @@ export const InputArea: React.FC<InputAreaProps> = ({
       >
         <textarea
           ref={textareaRef}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault();
-              onSubmit(e as unknown as React.FormEvent<HTMLFormElement>);
-            }
-          }}
+          value={value}
+          onChange={onChange}
+          onKeyDown={handleKeyDown}
           placeholder="Ask JENNA anything about Solana trading..."
           className="w-full p-4 pr-24 bg-transparent resize-none outline-none dark:text-white font-mono"
           rows={1}

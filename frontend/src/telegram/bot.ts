@@ -1,5 +1,5 @@
 import TelegramBot from 'node-telegram-bot-api';
-import { handleMessage } from './handler';
+import { handleMessage, Message } from './handler';
 import { elizaLogger } from "@ai16z/eliza";
 
 // Environment validation
@@ -16,11 +16,7 @@ const MAX_CONVERSATION_LENGTH = 10;
 const RATE_LIMIT_WINDOW = 60000; // 1 minute
 const MAX_MESSAGES_PER_WINDOW = 30;
 
-// Types
-interface Message {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-}
+
 
 interface UserState {
   conversation: Message[];
@@ -143,7 +139,12 @@ bot.on('message', async (msg) => {
     // Add user message to conversation
     const userMessage: Message = {
       role: 'user',
-      content: msg.text || ''
+      content: msg.text || '',
+      name: '',
+      function_call: {
+        name: '',
+        arguments: ''
+      }
     };
     userState.conversation.push(userMessage);
 
@@ -162,7 +163,12 @@ bot.on('message', async (msg) => {
     if (response) {
       userState.conversation.push({
         role: 'assistant',
-        content: response
+        content: response,
+        name: '',
+        function_call: {
+          name: '',
+          arguments: ''
+        }
       });
     }
 

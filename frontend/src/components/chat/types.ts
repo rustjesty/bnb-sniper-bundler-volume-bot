@@ -1,12 +1,12 @@
 // src/components/chat/types.ts
 import { IconProps } from '../Icon';
-import { FC } from 'react';
+import { FC, ChangeEvent, FormEvent } from 'react';
 
 export interface Message {
   role: 'user' | 'assistant';
   content: string;
-  name: string;
-  function_call: {
+  name: string;  // Made required to match groq.ts
+  function_call: {  // Made required to match groq.ts
     name: string;
     arguments: string;
   };
@@ -39,27 +39,33 @@ export interface SwapModalProps {
 export interface WelcomeScreenProps {
   examplePrompts: ExamplePrompt[];
   onPromptClick: (prompt: string) => void;
-  inputRef: React.RefObject<HTMLTextAreaElement>;
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
+}
+
+export interface ChatProps {
+  messages: Message[];
+  onSendMessage: (message: string) => Promise<void>;
+  isStreaming: boolean;
 }
 
 export interface InputAreaProps {
-  value: string;
-  onChange: (event: React.ChangeEvent<HTMLTextAreaElement>) => void;
-  onSend: (event: React.FormEvent<HTMLFormElement>) => void;
-  placeholder?: string;
   input: string;
-  setInput: (input: string) => void;
-  onSubmit: (event: React.FormEvent<HTMLFormElement>) => void;
+  setInput: (value: string) => void;
+  onSubmit: (e: FormEvent) => void;
   isStreaming: boolean;
-  isListening: boolean;
-  toggleListening: () => void;
+  isListening: boolean; // Added isListening
+  toggleListening: () => void; // Added toggleListening
+  value: string; // Added value
+  onChange: (e: ChangeEvent<HTMLTextAreaElement>) => void; // Added onChange
+  onSend: (e: FormEvent) => void; // Added onSend
 }
 
 export interface MessageListProps {
   messages: Message[];
-  onRetry: (message: Message) => void;
   currentResponse?: string;
-  onScroll?: () => void;
-  isLoading?: boolean;
-  error?: string | null;
+  isStreaming?: boolean;
+  onRetry?: (message: Message) => void; // Added onRetry
+  onScroll?: () => void; // Add this line
+  isLoading?: boolean; // Add this line
+  error?: string | null; // Add this line
 }

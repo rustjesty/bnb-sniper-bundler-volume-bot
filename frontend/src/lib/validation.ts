@@ -1,23 +1,17 @@
-const validatePrivateKey = (key: string) => {
-  if (!key.match(/^0x[0-9a-fA-F]{64}$/)) {
-    throw new Error('Invalid private key format');
-  }
+import { config } from 'dotenv';
+
+export const validateApiKey = (key: string | undefined): boolean => {
+  if (!key) return false;
+  return key.length > 0;
 };
 
 export const validateEnvironment = () => {
-  const requiredVars = [
-    'PRIVATE_KEY',
-    'RPC_URL',
-    'NEXT_PUBLIC_DEFAULT_POOL_ID'
-  ];
-
-  requiredVars.forEach(varName => {
-    if (!process.env[varName]) {
-      throw new Error(`Missing required environment variable: ${varName}`);
-    }
-  });
-
-  if (process.env.PRIVATE_KEY) {
-    validatePrivateKey(process.env.PRIVATE_KEY);
+  const requiredVars = ['NEXT_PUBLIC_GROQ_API_KEY'];
+  const missing = requiredVars.filter(key => !process.env[key]);
+  
+  if (missing.length > 0) {
+    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
   }
+  
+  return true;
 };

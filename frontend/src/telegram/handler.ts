@@ -1,13 +1,10 @@
 import TelegramBot from 'node-telegram-bot-api';
-import { botCompletion } from '../utils/groq';
+import { botCompletion, Message } from '../utils/groq';
 import { elizaLogger } from "@ai16z/eliza";
 import { getSolanaPrice } from '../utils/coingecko';
 import { getTrendingTokens } from '../utils/birdeye';
 
-interface Message {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-}
+
 
 // Handle specific commands
 async function handleCommand(command: string, chatId: number, bot: TelegramBot): Promise<string> {

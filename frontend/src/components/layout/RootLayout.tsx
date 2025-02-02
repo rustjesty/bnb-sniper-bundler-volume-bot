@@ -10,9 +10,7 @@ import {
   
 } from '@solana/wallet-adapter-wallets';
 import dynamic from 'next/dynamic';
-
-// Import wallet styles
-require('@solana/wallet-adapter-react-ui/styles.css');
+import '@solana/wallet-adapter-react-ui/styles.css'; // Import wallet styles
 
 // Dynamically import Navbar
 const Navbar = dynamic(() => import('../shared/Navbar'), { 

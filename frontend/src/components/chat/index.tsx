@@ -1,14 +1,18 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
-import { streamCompletion } from '@/utils/groq';
 import { MessageList } from './MessageList';
 import { InputArea } from './InputArea';
 import { WelcomeScreen } from './WelcomeScreen';
-
-import { EXAMPLE_PROMPTS } from './constants';
-import { Message, SwapDetails, ChatError, MessageListProps } from './types';
 import { SwapModal } from '../SwapModal';
+import { EXAMPLE_PROMPTS } from './constants';
+import { Message, SwapDetails, ChatError } from './types';
 
+// Define the component props interface
+export interface ChatComponentProps {
+  messages: Message[];
+  onSendMessage: (message: string) => Promise<void>;
+  isStreaming: boolean;
+}
 
 function useWalletStatus() {
   const { connected, publicKey } = useWallet();
@@ -21,31 +25,40 @@ function useWalletStatus() {
   };
 }
 
-export const Chat: React.FC = () => {
-  const [messages, setMessages] = useState<Message[]>([]);
+const Chat: React.FC<ChatComponentProps> = ({
+  messages: externalMessages,
+  onSendMessage,
+  isStreaming: externalIsStreaming
+}) => {
+  // Local state
   const [input, setInput] = useState('');
   const [isListening, setIsListening] = useState(false);
-  const [isStreaming, setIsStreaming] = useState(false);
   const [swapModalVisible, setSwapModalVisible] = useState(false);
   const [swapTokens, setSwapTokens] = useState<SwapDetails>();
   const [error, setError] = useState<ChatError | null>(null);
-  const [currentResponse, setCurrentResponse] = useState<string>('');
-  
+  const [currentResponse, setCurrentResponse] = useState('');
+
+  // Refs
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null!);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const recognition = useRef<any>(null);
 
-  const isInitialState = messages.length === 0;
+  // Wallet status
   const { isConnected, displayAddress } = useWalletStatus();
 
+  // Derived state
+  const isInitialState = externalMessages.length === 0;
+
+  // Auto-scroll effect
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, scrollToBottom]);
+  }, [externalMessages, scrollToBottom]);
 
+  // Speech recognition setup
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRecognition) {
@@ -70,12 +83,12 @@ export const Chat: React.FC = () => {
     }
   }, []);
 
+  // Handle message submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!input.trim() || isStreaming) return;
+    if (!input.trim() || externalIsStreaming) return;
 
     try {
-      setIsStreaming(true);
       const tradeCommand = parseTradeCommand(input);
       if (tradeCommand) {
         setSwapModalVisible(true);
@@ -83,35 +96,9 @@ export const Chat: React.FC = () => {
         return;
       }
 
-      const userMessage: Message = {
-        role: 'user',
-        content: input.trim(),
-        name: 'user',
-        function_call: {
-          name: '',
-          arguments: ''
-        }
-      };
-      
-      setMessages(prev => [...prev, userMessage]);
+      const message = input.trim();
       setInput('');
-      setCurrentResponse('');
-      
-      await streamCompletion([...messages, userMessage], (chunk) => {
-        setCurrentResponse(prev => prev + chunk);
-      });
-
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: currentResponse,
-        name: 'assistant',
-        function_call: {
-          name: '',
-          arguments: ''
-        }
-      }]);
-      
-      setCurrentResponse('');
+      await onSendMessage(message);
       setError(null);
     } catch (err) {
       setError({
@@ -119,11 +106,10 @@ export const Chat: React.FC = () => {
         code: 'SEND_ERROR',
         details: err
       });
-    } finally {
-      setIsStreaming(false);
     }
   };
 
+  // Parse trade commands
   const parseTradeCommand = (message: string): SwapDetails | null => {
     const match = message.match(/swap (\d+\.?\d*) (\w+) (?:for|to) (\w+)/i);
     if (!match) return null;
@@ -138,6 +124,7 @@ export const Chat: React.FC = () => {
     };
   };
 
+  // Toggle speech recognition
   const toggleListening = () => {
     if (isListening) {
       recognition.current?.stop();
@@ -149,6 +136,7 @@ export const Chat: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
+      {/* Header */}
       <div className="flex-0 border-b dark:border-gray-800 p-4">
         <div className="flex justify-between items-center">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white font-mono">
@@ -162,6 +150,7 @@ export const Chat: React.FC = () => {
         </div>
       </div>
 
+      {/* Main Content */}
       <div className={`flex-1 ${isInitialState ? 'flex items-center justify-center' : 'overflow-y-auto'} p-4`}>
         {error && (
           <div className="mb-4 p-3 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg">
@@ -172,33 +161,30 @@ export const Chat: React.FC = () => {
         {isInitialState ? (
           <WelcomeScreen 
             examplePrompts={EXAMPLE_PROMPTS} 
-            onPromptClick={setInput} 
-            inputRef={textareaRef} 
+            onPromptClick={setInput}
+            inputRef={textareaRef}
           />
         ) : (
           <MessageList 
-            messages={messages} 
-            currentResponse={currentResponse} 
-            onScroll={scrollToBottom} 
-            onRetry={(message: Message) => {
-              setMessages(prev => prev.filter(m => m !== message));
-              setInput(message.content);
-            }} 
+            messages={externalMessages}
+            currentResponse={currentResponse}
           />
         )}
       </div>
 
+      {/* Swap Modal */}
       <SwapModal
         isVisible={swapModalVisible}
         swapTokens={swapTokens}
         onClose={() => setSwapModalVisible(false)}
       />
 
+      {/* Input Area */}
       <InputArea
         input={input}
         setInput={setInput}
         onSubmit={handleSubmit}
-        isStreaming={isStreaming}
+        isStreaming={externalIsStreaming}
         isListening={isListening}
         toggleListening={toggleListening}
         value={input}

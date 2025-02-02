@@ -1,8 +1,6 @@
 import {CONFIG} from "../config/settings";
 import { MarketAnalysis, MarketMetrics } from "../../../src/services/blockchain/types.js";
-
-
-import { streamCompletion, validateApiKey } from '@/utils/groq';
+import { streamCompletion, validateApiKey, Message as GroqMessage } from '@/utils/groq';
 import logger from "@/utils/logger";
 import { validateSolanaAddress, validateTransactionHash } from '@/utils/validation';
 import { getSolanaPrice, getTrendingSolanaTokens } from '@/utils/coingecko';
@@ -17,7 +15,6 @@ import { PublicKey, VersionedTransaction } from '@solana/web3.js';
 import type { Portfolio } from '@/types/portfolio';
 import Groq from "groq-sdk";
 import { fetchPrice } from "solana-agent-kit/dist/tools/fetch_price";
-
 
 interface AIServiceConfig {
   groqApiKey: string;
@@ -390,16 +387,21 @@ export class AIService {
         return;
       }
 
-      const messages: Message[] = [{
+      const messages: GroqMessage[] = [{
         role: 'user',
-        content: message
+        content: message,
+        name: "",
+        function_call: {
+          name: "",
+          arguments: ""
+        }
       }];
 
       if (context) {
         messages.unshift({
           role: 'system',
           content: `Context: ${JSON.stringify(context)}`
-        });
+        } as unknown as GroqMessage);
       }
 
       await streamCompletion(messages, onChunk);
@@ -502,7 +504,7 @@ export class AIService {
     try {
       const marketData = await this.fetchMarketData(tokenAddress);
       
-      const messages: Message[] = [{
+      const messages: GroqMessage[] = [{
         role: 'user',
         content: `
           Analyze this market data and provide insights:
@@ -513,7 +515,12 @@ export class AIService {
           Market Cap: $${marketData.marketCap}
 
           Provide analysis in a clear, conversational format.
-        `
+        `,
+        name: "",
+        function_call: {
+          name: "",
+          arguments: ""
+        }
       }];
 
       await streamCompletion(messages, onChunk);
