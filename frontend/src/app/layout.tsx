@@ -1,53 +1,33 @@
-
 'use client';
 
 import { Inter } from 'next/font/google';
 import './globals.css';
 import '../lib/polyfills';
-import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
-import { WalletProvider } from '@solana/wallet-adapter-react';
-import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
-import { PhantomWalletAdapter } from '@solana/wallet-adapter-wallets';
-require('@solana/wallet-adapter-react-ui/styles.css');
 
 const inter = Inter({ subsets: ['latin'] });
 
-// Dynamically import Navbar with no SSR
-const Navbar = dynamic(() => import('../components/Navbar'), { ssr: false });
+// Dynamically import RootLayout to avoid SSR issues
+const RootLayout = dynamic(() => import('@/components/layout/RootLayout'), { 
+  ssr: false,
+  loading: () => (
+    <div className="flex min-h-screen items-center justify-center">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500"></div>
+    </div>
+  )
+});
 
-export default function RootLayout({
+export default function AppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [mounted, setMounted] = useState(false);
-
-  // Only initialize wallet adapter on client side
-  const [wallets] = useState(() => [new PhantomWalletAdapter()]);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
   return (
     <html lang="en">
       <body className={inter.className}>
-        <WalletProvider 
-          wallets={wallets} 
-          autoConnect={false} // Disable auto-connect
-        >
-          <WalletModalProvider>
-            {mounted && (
-              <>
-                <Navbar />
-                <main className="min-h-screen bg-gray-50 dark:bg-gray-900">
-                  {children}
-                </main>
-              </>
-            )}
-          </WalletModalProvider>
-        </WalletProvider>
+        <RootLayout>
+          {children}
+        </RootLayout>
       </body>
     </html>
   );

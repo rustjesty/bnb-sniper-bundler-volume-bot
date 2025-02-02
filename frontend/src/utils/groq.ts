@@ -67,10 +67,24 @@ interface PromptConfig {
 }
 
 export interface Message {
-  name: any;
-  function_call: any;
   role: 'user' | 'assistant' | 'function';
   content: string;
+  name: string;
+  function_call: {
+    name: string;
+    arguments: string;
+  };
+}
+
+interface RetryConfig {
+  maxRetries: number;
+  retryDelay: number;
+  tokenLimit: number;
+}
+
+interface GroqError extends Error {
+  status?: number;
+  code?: string;
 }
 
 // Configurations
@@ -97,10 +111,10 @@ const DEFAULT_CONFIGS: Record<string, PromptConfig> = {
   }
 };
 
-const RATE_LIMIT = {
-  MAX_RETRIES: 3,
-  RETRY_DELAY: 3500,
-  TOKEN_LIMIT: 5000
+const RATE_LIMIT: RetryConfig = {
+  maxRetries: 3,
+  retryDelay: 3500, // ms
+  tokenLimit: 5000
 };
 
 // Available functions for the AI
@@ -1050,7 +1064,7 @@ export async function streamCompletion(
     apiKey // Provide the OpenAI API key
   );
 
-  while (retries < RATE_LIMIT.MAX_RETRIES) {
+  while (retries < RATE_LIMIT.maxRetries) {
     try {
       // Add system message first
       const formattedMessages = [
@@ -1861,9 +1875,9 @@ export async function streamCompletion(
       
       // Handle rate limiting
       if (error?.status === 429) {
-        logger.warn(`Rate limited.Attempt ${ retries } of ${ RATE_LIMIT.MAX_RETRIES } `);
-        if (retries < RATE_LIMIT.MAX_RETRIES) {
-          await delay(RATE_LIMIT.RETRY_DELAY);
+        logger.warn(`Rate limited.Attempt ${ retries } of ${ RATE_LIMIT.maxRetries } `);
+        if (retries < RATE_LIMIT.maxRetries) {
+          await delay(RATE_LIMIT.retryDelay);
           continue;
         }
       }
@@ -1883,7 +1897,7 @@ export async function streamCompletion(
 
       onChunk(errorMessage);
       
-      if (retries >= RATE_LIMIT.MAX_RETRIES) {
+      if (retries >= RATE_LIMIT.maxRetries) {
         throw error;
       }
     }
@@ -1901,7 +1915,7 @@ export async function botCompletion(
   const groq = createGroqClient(apiKey);
   let retries = 0;
 
-  while (retries < RATE_LIMIT.MAX_RETRIES) {
+  while (retries < RATE_LIMIT.maxRetries) {
     try {
       const formattedMessages = [
         {
@@ -1941,8 +1955,8 @@ export async function botCompletion(
     } catch (error) {
       retries++;
       
-      if (retries < RATE_LIMIT.MAX_RETRIES) {
-        await delay(RATE_LIMIT.RETRY_DELAY);
+      if (retries < RATE_LIMIT.maxRetries) {
+        await delay(RATE_LIMIT.retryDelay);
         continue;
       }
       

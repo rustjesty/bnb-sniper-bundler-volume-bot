@@ -3,7 +3,7 @@ import parseTransaction from '@/tools/helius/helius_transaction_parsing';
 import { ScoringWalletKit } from '@/utils/scoringWallet';
 import { PublicKey } from '@solana/web3.js';
 import { SolanaAgentKit } from 'solana-agent-kit/dist/agent';
-import type ChartConfig from './Chart';
+import type ChartConfig from '../Chart';
 // Import our safe utilities
 import { safePublicKey, isValidBase58 } from '@/utils/base58';
 import logger from '@/utils/logger';
