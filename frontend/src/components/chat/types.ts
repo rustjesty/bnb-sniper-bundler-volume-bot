@@ -1,47 +1,27 @@
-// src/components/chat/types.ts
-import { IconProps } from '../Icon';
+// src/types/chat.ts
+import { IconProps } from '@/components/Icon';
 import { FC, ChangeEvent, FormEvent } from 'react';
 
+// Core message type
 export interface Message {
-  role: 'user' | 'assistant';
+  role: 'system' | 'user' | 'assistant' | 'function';
   content: string;
-  name: string;  // Made required to match groq.ts
-  function_call: {  // Made required to match groq.ts
+  name?: string;
+  function_call?: {
     name: string;
     arguments: string;
   };
 }
 
+// Add SwapDetails interface
 export interface SwapDetails {
-  from: string;
-  to: string;
-  amount?: number;
+  outputMint: string;
+  inputAmount: number;
+  inputMint: string;
+  inputDecimal: number;
 }
 
-export interface ChatError {
-  message: string;
-  code?: string;
-  details?: any;
-}
-
-export interface ExamplePrompt {
-  title: string;
-  prompt: string;
-  icon: FC<IconProps>;
-}
-
-export interface SwapModalProps {
-  isVisible: boolean;
-  swapTokens?: SwapDetails;
-  onClose: () => void;
-}
-
-export interface WelcomeScreenProps {
-  examplePrompts: ExamplePrompt[];
-  onPromptClick: (prompt: string) => void;
-  inputRef: React.RefObject<HTMLTextAreaElement | null>;
-}
-
+// UI component props
 export interface ChatProps {
   messages: Message[];
   onSendMessage: (message: string) => Promise<void>;
@@ -53,19 +33,38 @@ export interface InputAreaProps {
   setInput: (value: string) => void;
   onSubmit: (e: FormEvent) => void;
   isStreaming: boolean;
-  isListening: boolean; // Added isListening
-  toggleListening: () => void; // Added toggleListening
-  value: string; // Added value
-  onChange: (e: ChangeEvent<HTMLTextAreaElement>) => void; // Added onChange
-  onSend: (e: FormEvent) => void; // Added onSend
+  isListening: boolean;
+  toggleListening: () => void;
+  value: string;
+  onChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
+  onSend: (e: FormEvent) => void;
 }
 
 export interface MessageListProps {
   messages: Message[];
   currentResponse?: string;
   isStreaming?: boolean;
-  onRetry?: (message: Message) => void; // Added onRetry
-  onScroll?: () => void; // Add this line
-  isLoading?: boolean; // Add this line
-  error?: string | null; // Add this line
+  onRetry?: (message: Message) => void;
+  onScroll?: () => void;
+  isLoading?: boolean;
+  error?: string | null;
+}
+
+export interface ExamplePrompt {
+  title: string;
+  prompt: string;
+  icon: FC<IconProps>;
+}
+
+export interface WelcomeScreenProps {
+  examplePrompts: ExamplePrompt[];
+  onPromptClick: (prompt: string) => void;
+  inputRef: React.RefObject<HTMLTextAreaElement | null>;
+}
+
+// Error handling
+export interface ChatError {
+  message: string;
+  code?: string;
+  details?: any;
 }

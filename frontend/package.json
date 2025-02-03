@@ -52,6 +52,7 @@
     "react-markdown": "^9.0.1",
     "react-syntax-highlighter": "^15.6.1",
     "react-toastify": "^11.0.3",
+    "remark-gfm": "^4.0.0",
     "solana-agent-kit": "^1.1.0",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",

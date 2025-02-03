@@ -1,30 +1,49 @@
 // src/app/api/chat/route.ts
 import { NextResponse } from 'next/server';
 import { streamCompletion } from '@/utils/groq';
-import { Message } from '@/components/chat/types';
+
 import logger from '@/utils/logger';
 
 export async function POST(request: Request) {
   try {
     const { messages } = await request.json();
 
-    // Validate GROQ API key
+    // Validate API key
     const apiKey = process.env.NEXT_PUBLIC_GROQ_API_KEY;
     if (!apiKey) {
-      throw new Error('GROQ API key not configured');
+      logger.error('GROQ API key not configured');
+      return NextResponse.json(
+        { error: 'Service configuration error' },
+        { status: 500 }
+      );
     }
 
-    // Return a streaming response
+    // Create streaming response
     const stream = new TransformStream();
     const writer = stream.writable.getWriter();
     const encoder = new TextEncoder();
 
-    // Process chat completion
-    streamCompletion(messages as Message[], async (chunk) => {
-      await writer.write(encoder.encode(`data: ${JSON.stringify({ content: chunk })}\n\n`));
-    }).finally(() => writer.close());
+    // Process chat completion with error handling
+    streamCompletion(
+      messages,
+      async (chunk) => {
+        try {
+          await writer.write(
+            encoder.encode(`data: ${JSON.stringify({ content: chunk })}\n\n`)
+          );
+        } catch (writeError) {
+          logger.error('Stream write error:', writeError);
+        }
+      }
+    ).catch((error) => {
+      logger.error('Stream completion error:', error);
+    }).finally(() => {
+      writer.close().catch((error) => {
+        logger.error('Stream close error:', error);
+      });
+    });
 
-    // Return the stream with appropriate headers
+    // Return stream with appropriate headers
     return new NextResponse(stream.readable, {
       headers: {
         'Content-Type': 'text/event-stream',
@@ -32,6 +51,7 @@ export async function POST(request: Request) {
         'Connection': 'keep-alive',
       },
     });
+
   } catch (error) {
     logger.error('Chat API error:', error);
     return NextResponse.json(

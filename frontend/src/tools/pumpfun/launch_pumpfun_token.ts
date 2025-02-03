@@ -1,8 +1,31 @@
-// src/tools/launch_pumpfun_token.ts
-import { VersionedTransaction, Keypair } from "@solana/web3.js";
-import { PumpfunLaunchResponse, PumpFunTokenOptions, SolanaAgentKit } from "solana-agent-kit";
+import { 
+  Connection, 
+  Keypair, 
+  VersionedTransaction 
+} from "@solana/web3.js";
+import bs58 from 'bs58';
 
+interface PumpFunTokenOptions {
+  twitter?: string;
+  telegram?: string;
+  website?: string;
+  initialLiquiditySOL?: number;
+  slippageBps?: number;
+  priorityFee?: number;
+  description?: string;
+  rpcUrl?: string;
+  privateKey?: string;
+}
 
+interface LaunchResponse {
+  signature: string;
+  mint: string;
+  metadataUri: string;
+}
+
+/**
+ * Upload token metadata to IPFS via Pump.fun
+ */
 async function uploadMetadata(
   tokenName: string,
   tokenTicker: string,
@@ -15,39 +38,33 @@ async function uploadMetadata(
   formData.append("name", tokenName);
   formData.append("symbol", tokenTicker);
   formData.append("description", description);
-
   formData.append("showName", "true");
 
-  if (options?.twitter) {
-    formData.append("twitter", options.twitter);
-  }
-  if (options?.telegram) {
-    formData.append("telegram", options.telegram);
-  }
-  if (options?.website) {
-    formData.append("website", options.website);
-  }
+  // Add optional social links
+  if (options?.twitter) formData.append("twitter", options.twitter);
+  if (options?.telegram) formData.append("telegram", options.telegram);
+  if (options?.website) formData.append("website", options.website);
 
+  // Fetch and prepare image
   const imageResponse = await fetch(imageUrl);
   const imageBlob = await imageResponse.blob();
   const files = {
-    file: new File([imageBlob], "token_image.png", { type: "image/png" }),
+    file: new File([imageBlob], "token_image.png", { type: "image/png" })
   };
 
-  // Create form data with both metadata and file
+  // Create final form data
   const finalFormData = new FormData();
-  // Add all metadata fields
   for (const [key, value] of formData.entries()) {
     finalFormData.append(key, value);
   }
-  // Add file if exists
   if (files?.file) {
     finalFormData.append("file", files.file);
   }
 
+  // Upload metadata
   const metadataResponse = await fetch("https://pump.fun/api/ipfs", {
     method: "POST",
-    body: finalFormData,
+    body: finalFormData
   });
 
   if (!metadataResponse.ok) {
@@ -57,14 +74,17 @@ async function uploadMetadata(
   return await metadataResponse.json();
 }
 
+/**
+ * Create token launch transaction
+ */
 async function createTokenTransaction(
-  agent: SolanaAgentKit,
+  wallet: Keypair,
   mintKeypair: Keypair,
   metadataResponse: any,
   options?: PumpFunTokenOptions,
 ) {
   const payload = {
-    publicKey: agent.wallet_address.toBase58(),
+    publicKey: wallet.publicKey.toBase58(),
     action: "create",
     tokenMetadata: {
       name: metadataResponse.metadata.name,
@@ -72,7 +92,7 @@ async function createTokenTransaction(
       uri: metadataResponse.metadataUri,
     },
     mint: mintKeypair.publicKey.toBase58(),
-    denominatedInSol: "true", // API expects string "true"
+    denominatedInSol: "true",
     amount: options?.initialLiquiditySOL || 0.0001,
     slippage: options?.slippageBps || 5,
     priorityFee: options?.priorityFee || 0.00005,
@@ -89,39 +109,33 @@ async function createTokenTransaction(
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(
-      `Transaction creation failed: ${response.status} - ${errorText}`,
-    );
+    throw new Error(`Transaction creation failed: ${response.status} - ${errorText}`);
   }
 
   return response;
 }
 
+/**
+ * Sign and send transaction
+ */
 async function signAndSendTransaction(
-  kit: SolanaAgentKit,
+  connection: Connection,
+  wallet: Keypair,
   tx: VersionedTransaction,
   mintKeypair: Keypair,
-) {
+): Promise<string> {
   try {
-    // Get the latest blockhash
-    const { blockhash, lastValidBlockHeight } =
-      await kit.connection.getLatestBlockhash();
-
-    // Update transaction with latest blockhash
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
     tx.message.recentBlockhash = blockhash;
+    tx.sign([mintKeypair, wallet]);
 
-    // Sign the transaction
-    tx.sign([mintKeypair, kit.wallet]);
-
-    // Send and confirm transaction with options
-    const signature = await kit.connection.sendTransaction(tx, {
+    const signature = await connection.sendTransaction(tx, {
       skipPreflight: false,
       preflightCommitment: "confirmed",
       maxRetries: 5,
     });
 
-    // Wait for confirmation
-    const confirmation = await kit.connection.confirmTransaction({
+    const confirmation = await connection.confirmTransaction({
       signature,
       blockhash,
       lastValidBlockHeight,
@@ -135,7 +149,7 @@ async function signAndSendTransaction(
   } catch (error) {
     console.error("Transaction send error:", error);
     if (error instanceof Error && "logs" in error) {
-      console.error("Transaction logs:", error.logs);
+      console.error("Transaction logs:", (error as any).logs);
     }
     throw error;
   }
@@ -143,53 +157,68 @@ async function signAndSendTransaction(
 
 /**
  * Launch a token on Pump.fun
- * @param agent - SolanaAgentKit instance
- * @param tokenName - Name of the token
- * @param tokenTicker - Ticker of the token
- * @param description - Description of the token
- * @param imageUrl - URL of the token image
- * @param options - Optional token options (twitter, telegram, website, initialLiquiditySOL, slippageBps, priorityFee)
- * @returns - Signature of the transaction, mint address and metadata URI, if successful, else error
+ * @param tokenName Token name
+ * @param tokenTicker Token ticker symbol
+ * @param description Token description
+ * @param imageUrl Token image URL
+ * @param options Additional options including connection details
+ * @returns Transaction signature, mint address and metadata URI
  */
 export async function launchPumpFunToken(
-  agent: SolanaAgentKit,
   tokenName: string,
   tokenTicker: string,
   description: string,
   imageUrl: string,
-  options?: PumpFunTokenOptions,
-): Promise<PumpfunLaunchResponse> {
+  options?: PumpFunTokenOptions
+): Promise<LaunchResponse> {
   try {
+    // Initialize connection and wallet
+    const connection = new Connection(
+      options?.rpcUrl || process.env.NEXT_PUBLIC_RPC_URL || 'https://api.mainnet-beta.solana.com',
+      'confirmed'
+    );
+
+    const privateKey = options?.privateKey || process.env.NEXT_PUBLIC_PRIVATE_KEY;
+    if (!privateKey) {
+      throw new Error('Private key is required');
+    }
+
+    const wallet = Keypair.fromSecretKey(bs58.decode(privateKey));
     const mintKeypair = Keypair.generate();
+
+    // Upload metadata
     const metadataResponse = await uploadMetadata(
       tokenName,
       tokenTicker,
       description,
       imageUrl,
-      options,
+      options
     );
+
+    // Create transaction
     const response = await createTokenTransaction(
-      agent,
+      wallet,
       mintKeypair,
       metadataResponse,
-      options,
+      options
     );
+
+    // Process and send transaction
     const transactionData = await response.arrayBuffer();
-    const tx = VersionedTransaction.deserialize(
-      new Uint8Array(transactionData),
-    );
-    const signature = await signAndSendTransaction(agent, tx, mintKeypair);
+    const tx = VersionedTransaction.deserialize(new Uint8Array(transactionData));
+    const signature = await signAndSendTransaction(connection, wallet, tx, mintKeypair);
 
     return {
       signature,
       mint: mintKeypair.publicKey.toBase58(),
       metadataUri: metadataResponse.metadataUri,
     };
+
   } catch (error) {
-    console.error("Error in launchpumpfuntoken:", error);
+    console.error("Error launching PumpFun token:", error);
     if (error instanceof Error && "logs" in error) {
       console.error("Transaction logs:", (error as any).logs);
     }
-    throw error;
+    throw new Error(`Token launch failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }

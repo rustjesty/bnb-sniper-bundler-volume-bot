@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
-import { MessageList } from './MessageList';
 import { InputArea } from './InputArea';
 import { WelcomeScreen } from './WelcomeScreen';
 import { SwapModal } from '../SwapModal';
 import { EXAMPLE_PROMPTS } from './constants';
-import { Message, SwapDetails, ChatError } from './types';
+import { Message,  ChatError, SwapDetails } from './types';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 // Define the component props interface
 export interface ChatComponentProps {
@@ -118,9 +119,10 @@ const Chat: React.FC<ChatComponentProps> = ({
     if (isNaN(amount) || amount <= 0) return null;
 
     return {
-      amount,
-      from: match[2].toUpperCase(),
-      to: match[3].toUpperCase()
+      inputAmount: amount,
+      inputMint: match[2].toUpperCase(),
+      outputMint: match[3].toUpperCase(),
+      inputDecimal: 9 // Assuming a default value for inputDecimal
     };
   };
 
@@ -193,6 +195,98 @@ const Chat: React.FC<ChatComponentProps> = ({
       />
       
       <div ref={messagesEndRef} />
+    </div>
+  );
+};
+
+interface MarkdownOptions {
+  components: {
+    p: React.FC<any>;
+    pre: React.FC<any>;
+    code: React.FC<any>;
+  };
+}
+
+const markdownComponents: MarkdownOptions['components'] = {
+  // Handle paragraphs
+  p: ({ children, ...props }) => {
+    // Check if children contain pre/code blocks
+    const hasCodeBlock = React.Children.toArray(children).some(
+      child => React.isValidElement(child) && 
+      (child.type === 'pre' || child.type === 'code')
+    );
+    
+    // If contains code block, render without p wrapper
+    if (hasCodeBlock) {
+      return <>{children}</>;
+    }
+    
+    return <p {...props}>{children}</p>;
+  },
+
+  // Handle pre blocks
+  pre: ({ children, ...props }) => (
+    <div className="my-4">
+      <pre className="bg-gray-800 p-4 rounded-lg overflow-x-auto" {...props}>
+        {children}
+      </pre>
+    </div>
+  ),
+
+  // Handle inline code
+  code: ({ children, ...props }) => (
+    <code className="bg-gray-800 px-2 py-1 rounded" {...props}>
+      {children}
+    </code>
+  )
+};
+
+interface MessageListProps {
+  messages: Message[];
+  currentResponse: string;
+}
+
+const MessageList: React.FC<MessageListProps> = ({ messages, currentResponse }) => {
+  return (
+    <div className="space-y-4">
+      {messages.map((message, index) => (
+        <div key={index} className={`flex ${
+          message.role === 'user' ? 'justify-end' : 'justify-start'
+        }`}>
+          <div className={`max-w-[85%] rounded-lg p-4 ${
+            message.role === 'user'
+              ? 'bg-purple-500 text-white'
+              : 'bg-white dark:bg-gray-800 dark:text-white'
+          }`}>
+            {message.role === 'assistant' ? (
+              <ReactMarkdown 
+                components={markdownComponents}
+                remarkPlugins={[remarkGfm]}
+                className="prose dark:prose-invert max-w-none"
+              >
+                {message.content}
+              </ReactMarkdown>
+            ) : (
+              <p className="whitespace-pre-wrap break-words">
+                {message.content}
+              </p>
+            )}
+          </div>
+        </div>
+      ))}
+      {currentResponse && (
+        <div className="flex justify-start">
+          <div className="max-w-[85%] rounded-lg p-4 bg-white dark:bg-gray-800 dark:text-white">
+            <ReactMarkdown 
+              components={markdownComponents}
+              remarkPlugins={[remarkGfm]}
+              className="prose dark:prose-invert max-w-none"
+            >
+              {currentResponse}
+            </ReactMarkdown>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

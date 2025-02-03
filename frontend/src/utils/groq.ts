@@ -1,8 +1,7 @@
 // Core imports
 import { Groq } from 'groq-sdk';
-import { LAMPORTS_PER_SOL, PublicKey, Connection, Transaction } from '@solana/web3.js';
-import { SolanaAgentKit } from 'solana-agent-kit';
-import base58 from 'bs58';
+import { PublicKey, Connection } from '@solana/web3.js';
+
 
 // Local utility imports
 import { getSolanaPrice, getTrendingSolanaTokens } from './coingecko';
@@ -15,34 +14,30 @@ import logger from './logger';
 import { getTrendingTokens } from './birdeye';
 
 // Document and template imports
-import { SYSTEM_TEMPLATE } from './DefaultRetrievalText';
 import { processDocuments, formatRetrievalResults, DocumentChunk, RetrievalOptions } from './DocumentRetrieval';
 
 // Tool and feature imports
-import { getSignature } from './getSignature';
 import { fetch_tx, calc_tx_freq, calc_vol, calc_profitability, calc_dex_diversity, calc_stabel_token_vol, calc_final_score } from './helper';
 import { ScoringWalletKit } from './scoringWallet';
 import markdownToHTML from './markdownToHTML';
 import { getPortfolio, rebalancePortfolio } from './portfolio';
 import { TransactionProcessor } from './transactions';
 import { transactionSenderAndConfirmationWaiter } from './transactionSender';
-import { create_image } from '@/tools/agent/create_image';
 import { getTokenDataByAddress, getTokenDataByTicker } from '@/tools/dexscreener';
 import { getAssetsByOwner } from '@/tools/helius';
 import { getRecentTransactions } from '@/tools/helius/get_recent_transactions';
-import { parseTransaction } from '@/tools/helius/helius_transaction_parsing';
-import { sendTransactionWithPriorityFee } from '@/tools/helius/send_transaction_with_priority';
-import { stakeWithJup } from '@/tools/jupiter/stake_with_jup';
+import { parseTransaction, formatTransactionForChat } from '@/tools/helius/helius_transaction_parsing';
+import { sendTransactionWithPriority } from '@/tools/helius/send_transaction_with_priority';
+import { getJupiterStakingApy, stakeWithJupiter } from '@/tools/jupiter/stake_with_jup';
 import { trade } from '@/tools/jupiter/trade';
-import { openbookCreateMarket } from '@/tools/openbook/openbook_create_market';
+import { createOpenbookMarket } from '@/tools/openbook/openbook_create_market';
 import { launchPumpFunToken } from '@/tools/pumpfun/launch_pumpfun_token';
 import { swapTool } from '@/tools/swap';
-import { CHAT_TEMPLATE, CONDENSE_QUESTION_TEMPLATE, QA_TEMPLATE, REPHRASE_TEMPLATE } from './RetrievalPrompts';
+import { CONDENSE_QUESTION_TEMPLATE, REPHRASE_TEMPLATE } from './RetrievalPrompts';
 //import { AmmInfo, AmmMarket, AmmOps, AmmPool, ClmmDecrease, ClmmFarm, ClmmHarvest, ClmmIncrease, ClmmMarketMaker, ClmmNewPosition, ClmmPool, ClmmPoolInfo, ClmmRewards, FarmStake } from '@/raydium';
 import { geckoTerminalAPI } from '@/tools/geckoterminal';
-import { MarketDataHelper } from '@/tools/geckoterminal/marketData';
-import { tryBase58Decode, isValidBase58, safePublicKey } from '@/utils/base58';
-import { RaydiumWrapper } from '@/utils/raydium-wrapper';
+import { MessageManager, RetryHandler } from './messageManager';
+
 
 
 // Constants
@@ -50,7 +45,7 @@ const BALANCE_CACHE_DURATION = 10000; // 10 seconds
 const balanceCache = new Map<string, { balance: number; timestamp: number }>();
 
 const USDC_MINT = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-
+ 
 // Templates and Personalities
 const JENNA_PERSONALITY = `You are JENNA, a specialized AI assistant focused on Solana blockchain and cryptocurrency trading.
 - Always maintain a professional but friendly tone
@@ -68,19 +63,30 @@ interface PromptConfig {
 }
 
 export interface Message {
-  role: 'user' | 'assistant' | 'function';
+  role: 'user' | 'assistant' | 'function' | 'system'; // Add 'system' role
   content: string;
-  name: string;
-  function_call: {
+  name: string; // Make name required
+  tool_call_id?: {
     name: string;
     arguments: string;
   };
+  timestamp: number; // Add timestamp to Message interface
 }
 
 interface RetryConfig {
   maxRetries: number;
   retryDelay: number;
   tokenLimit: number;
+}
+
+interface Delta {
+  content?: string;
+  tool_calls?: Array<{
+    function: {
+      name: string;
+      arguments: string;
+    }
+  }>;
 }
 
 interface GroqError extends Error {
@@ -1047,6 +1053,116 @@ export async function retrieveAndFormatDocuments(
   return formatRetrievalResults(results);
 }
 
+async function reviewTransaction(signature: string): Promise<string> {
+  try {
+    const txData = await parseTransaction(signature);
+    return formatTransactionForChat(txData);
+  } catch (error) {
+    console.error('Error reviewing transaction:', error);
+    return 'Failed to parse transaction. Please check the signature and try again.';
+  }
+}
+
+// Helper function to count tokens in messages
+function countTokens(messages: Message[]): number {
+  return messages.reduce((acc, msg) => acc + msg.content.split(' ').length, 0);
+}
+
+// Helper function to clean up message history
+function cleanUpMessages(messages: Message[], maxTokens: number): Message[] {
+  let tokenCount = countTokens(messages);
+  while (tokenCount > maxTokens) {
+    messages.shift();
+    tokenCount = countTokens(messages);
+  }
+  return messages;
+}
+
+// Tool handler system
+interface ToolHandler {
+  name: string;
+  handler: (args: any) => Promise<any>;
+  fallback?: (args: any) => Promise<any>;
+  isAvailable: () => boolean;
+}
+
+const toolHandlers: Record<string, ToolHandler> = {
+  getSolanaPrice: {
+    name: 'getSolanaPrice',
+    handler: async () => {
+      // Implement actual price fetch
+      return await getSolanaPrice();
+    },
+    fallback: async () => {
+      // Return cached or approximate data
+      return {
+        price: "Currently unavailable",
+        message: "Please check CoinGecko or another price source."
+      };
+    },
+    isAvailable: () => true
+  },
+  getWalletBalance: {
+    name: 'getWalletBalance',
+    handler: async (address: string) => {
+      return await getSolanaBalance(address);
+    },
+    fallback: async () => {
+      return {
+        message: "Balance check temporarily unavailable. Please use Solana Explorer.",
+        explorerUrl: "https://explorer.solana.com"
+      };
+    },
+    isAvailable: () => Boolean(process.env.NEXT_PUBLIC_RPC_URL)
+  }
+  // Add other tools...
+};
+
+const ERROR_RESPONSES = {
+  TOOL_UNAVAILABLE: (toolName: string) => 
+    `I apologize, but ${toolName} is temporarily unavailable. Here are alternative methods you can use:`,
+  
+  TOOL_ERROR: (error: Error) =>
+    `I encountered an error while processing your request: ${error.message}. Let me suggest an alternative approach:`,
+  
+  FALLBACK_SUGGESTION: (toolName: string) => ({
+    getSolanaPrice: "You can check the price on CoinGecko or Birdeye.",
+    getWalletBalance: "You can check your balance directly on Solana Explorer.",
+    // Add other fallbacks...
+  }[toolName] || "Please try again later or use an alternative method.")
+};
+
+async function handleToolCall(toolCall: any, onChunk: (text: string) => void) {
+  const { name, arguments: args } = toolCall;
+  const tool = toolHandlers[name];
+
+  if (!tool) {
+    onChunk(`I apologize, but ${name} is not a supported tool. `);
+    return;
+  }
+
+  try {
+    if (!tool.isAvailable()) {
+      onChunk(ERROR_RESPONSES.TOOL_UNAVAILABLE(name));
+      onChunk('\n' + ERROR_RESPONSES.FALLBACK_SUGGESTION(name));
+      
+      if (tool.fallback) {
+        const fallbackResult = await tool.fallback(args);
+        onChunk('\nFallback information: ' + JSON.stringify(fallbackResult));
+      }
+      return;
+    }
+
+    const result = await tool.handler(args);
+    onChunk(JSON.stringify(result));
+
+  } catch (error) {
+    logger.error(`Error in ${name}:`, error);
+    onChunk(ERROR_RESPONSES.TOOL_ERROR(error as Error));
+    onChunk('\n' + ERROR_RESPONSES.FALLBACK_SUGGESTION(name));
+  }
+}
+
 // Main streaming completion function
 export async function streamCompletion(
   messages: Message[], 
@@ -1058,44 +1174,31 @@ export async function streamCompletion(
   const groq = createGroqClient(apiKey);
   let retries = 0;
 
-  const privateKey = process.env.SOLANA_PRIVATE_KEY!;
-  let decodedPrivateKey;
-
-  try {
-    decodedPrivateKey = base58.decode(privateKey);
-  } catch (error) {
-    throw new Error('Invalid Solana private key format. Please ensure it is base58 encoded.');
-  }
-
-  // Create an instance of SolanaAgentKit
-  const agent = new SolanaAgentKit(
-    base58.encode(decodedPrivateKey),  // Convert decoded private key back to base58 string
-    'https://api.mainnet-beta.solana.com', // Provide the RPC URL
-    apiKey // Provide the OpenAI API key
-  );
-
   while (retries < RATE_LIMIT.maxRetries) {
     try {
+      // Clean up messages to respect token limit
+      const cleanedMessages = cleanUpMessages(messages, RATE_LIMIT.tokenLimit);
+
       // Add system message first
       const formattedMessages = [
         {
           role: 'system' as const,
           content: JENNA_PERSONALITY
         },
-        ...messages.map(msg => {
+        ...cleanedMessages.map(msg => {
           if (msg.role === 'function') {
             return {
               role: 'function' as const,
               name: msg.name!,
               content: msg.content,
-              function_call: msg.function_call
+              tool_call_id: msg.tool_call_id // Changed from function_call to tool_call_id
             };
           }
           return {
             role: msg.role as 'system' | 'user' | 'assistant',
             content: msg.content,
             ...(msg.name && { name: msg.name }),
-            ...(msg.function_call && { function_call: msg.function_call })
+            ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id }) // Changed from function_call to tool_call_id
           };
         })
       ];
@@ -1115,25 +1218,45 @@ export async function streamCompletion(
       let functionArgs = '';
 
       for await (const chunk of stream) {
-        const delta = chunk.choices[0]?.delta;
+        const delta = chunk.choices[0]?.delta as Delta;
 
-        if (delta.function_call) {
-          functionCallInProgress = true;
-          functionName = delta.function_call.name || functionName;
-          functionArgs += delta.function_call.arguments || '';
+        if (delta.tool_calls) {
+          for (const toolCall of delta.tool_calls) {
+            functionCallInProgress = true;
+            functionName = toolCall.function.name;
+            functionArgs += toolCall.function.arguments;
+          }
           continue;
         }
 
-        if (functionCallInProgress && !delta.function_call) {
+        if (functionCallInProgress && !delta.tool_calls) {
           functionCallInProgress = false;
           try {
             let result;
             switch (functionName) {
               case 'stakeWithJup':
-                const { amount } = JSON.parse(functionArgs);
-                result = await stakeWithJup(agent, amount);
-                onChunk(`\nStaking Transaction Signature: ${ result } \n`);
-                break;
+  try {
+    const { amount } = JSON.parse(functionArgs);
+    const result = await stakeWithJupiter(
+      amount,
+      {
+        rpcUrl: process.env.NEXT_PUBLIC_RPC_URL,
+        privateKey: process.env.SOLANA_PRIVATE_KEY
+      }
+    );
+    onChunk(`\nStaking Transaction Signature: ${result}\n`);
+    
+    // Optionally fetch and display APY
+    try {
+      const apy = await getJupiterStakingApy();
+      onChunk(`Current jupSOL Staking APY: ${apy.toFixed(2)}%\n`);
+    } catch (apyError) {
+      console.error('Error fetching APY:', apyError);
+    }
+  } catch (error) {
+    onChunk(`\nStaking error: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+  }
+  break;
               
               case 'getSolanaPrice':
                 result = await getSolanaPrice();
@@ -1168,23 +1291,8 @@ export async function streamCompletion(
 
               case 'reviewTransaction':
                 const { hash } = JSON.parse(functionArgs);
-                if (!validateTransactionHash(hash)) {
-                  onChunk("\nInvalid transaction hash. Please provide a valid Solana transaction signature.\n");
-                  break;
-                } 
-
-                const txDetails = await getTransactionDetails(hash);
-                const signature = getSignature(txDetails as unknown as Transaction); 
-                onChunk(`\nTransaction Details: \n\n`);
-                onChunk(`Status: ${ txDetails.status } \n`);
-                onChunk(`Timestamp: ${ txDetails.timestamp } \n`);
-                onChunk(`Signature: ${ signature } \n`);
-                if (txDetails.amount) {
-                  onChunk(`Amount: ${ (txDetails.amount / LAMPORTS_PER_SOL).toFixed(4) } SOL\n`);
-                }
-                if (txDetails.fee) {
-                  onChunk(`Fee: ${ txDetails.fee } SOL\n`);
-                }
+                const reviewResult = await reviewTransaction(hash);
+                onChunk(reviewResult);
                 break;
 
               case 'getAgentBalance':
@@ -1651,32 +1759,7 @@ export async function streamCompletion(
                 }
                 break;
 
-              case 'generateImage':
-                try {
-                  const { prompt, size = '1024x1024', n = 1 } = JSON.parse(functionArgs);
-                  
-                  const agent = new SolanaAgentKit(
-                    process.env.SOLANA_PRIVATE_KEY!,  // Provide the private key
-                    'https://api.mainnet-beta.solana.com', // Provide the RPC URL
-                    process.env.GROQ_API_KEY!// Provide the OpenAI API key, ensure it's a string
-                  );
-          
-                  const result = await create_image(agent, prompt, size, n);
-          
-                  onChunk(`\nImage Generation Results: \n`);
-                  result.images.forEach((image, i) => {
-                    onChunk(`Image ${ i + 1 }: ${ image } \n`);
-                  });
-                  onChunk(`\nMetadata: \n`);
-                  onChunk(`Model: ${ result.metadata?.model } \n`);
-                  onChunk(`Generation Time: ${ result.metadata?.inferenceTime } ms\n`);
-                } catch (error) {
-                  const parsedError = JSON.parse((error as Error).message);
-                  onChunk(`\nImage Generation Failed: \n`);
-                  onChunk(`Error Code: ${ parsedError.code } \n`);
-                  onChunk(`Message: ${ parsedError.message } \n`);
-                }
-                break;
+              
 
               case 'getTokenData':
                 try {
@@ -1770,12 +1853,7 @@ export async function streamCompletion(
               case 'parseTransaction':
                 try {
                   const { transactionId } = JSON.parse(functionArgs);
-                  const agent = new SolanaAgentKit(
-                    process.env.SOLANA_PRIVATE_KEY!,  // Provide the private key
-                    'https://api.mainnet-beta.solana.com',
-                    process.env.GROQ_API_KEY! // Provide the RPC URL
-                  );
-                  const parsedData = await parseTransaction(agent, transactionId);
+                  const parsedData = await parseTransaction(transactionId);
                   
                   onChunk(`\nParsed Transaction Data: \n\n`);
                   onChunk(JSON.stringify(parsedData, null, 2));
@@ -1784,39 +1862,67 @@ export async function streamCompletion(
                 }
                 break;
 
-              case 'sendHighPriorityTransaction':
-                try {
-                  const { priorityLevel, amount, to, splmintAddress } = JSON.parse(functionArgs);
-                  const agent = new SolanaAgentKit(
-                    process.env.SOLANA_PRIVATE_KEY!,  // Provide the private key
-                    'https://api.mainnet-beta.solana.com' ,
-                    process.env.GROQ_API_KEY! // Provide the RPC URL
-                  );
-                  const recipient = new PublicKey(to);
-                  const transactionResult = await sendTransactionWithPriorityFee(agent, priorityLevel, amount, recipient, splmintAddress ? new PublicKey(splmintAddress) : undefined);
-                  
-                  onChunk(`\nTransaction Sent: \n\n`);
-                  onChunk(`Transaction ID: ${ transactionResult.transactionId } \n`);
-                  onChunk(`Priority Fee: ${ transactionResult.fee } microLamports\n`);
-                } catch (error) {
-                  onChunk(`\nFailed to send transaction: ${ error instanceof Error ? error.message : 'Unknown error' } \n`);
-                }
-                break;
+              ;case 'sendHighPriorityTransaction':
+              try {
+                const { priorityLevel, amount, to, splMintAddress } = JSON.parse(functionArgs);
+                const result = await sendTransactionWithPriority(
+                  priorityLevel,
+                  amount,
+                  to,
+                  {
+                    splMintAddress,
+                    rpcUrl: process.env.NEXT_PUBLIC_RPC_URL,
+                    privateKey: process.env.SOLANA_PRIVATE_KEY
+                  }
+                );
+                onChunk(`\nTransaction sent successfully!\nSignature: ${result.transactionId}\nPriority Fee: ${result.fee} microlamports\n`);
+              } catch (error) {
+                onChunk(`\nError sending transaction: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+              }
+              break;
 
               case 'openbookCreateMarket':
-                const { baseMint, quoteMint, lotSize, tickSize } = JSON.parse(functionArgs);
-                result = await openbookCreateMarket(agent, new PublicKey(baseMint), new PublicKey(quoteMint), lotSize, tickSize);
-                onChunk(`\nMarket Created Successfully: \n\n`);
-                onChunk(`Transaction IDs: ${ result.join(', ') } \n`);
-                break;
+  try {
+    const { baseMint, quoteMint, lotSize, tickSize } = JSON.parse(functionArgs);
+    const result = await createOpenbookMarket(
+      baseMint,
+      quoteMint,
+      lotSize,
+      tickSize,
+      {
+        rpcUrl: process.env.NEXT_PUBLIC_RPC_URL,
+        privateKey: process.env.SOLANA_PRIVATE_KEY
+      }
+    );
+    onChunk(`\nMarket Created Successfully:\n\n`);
+    onChunk(`Transaction IDs: ${result.join(', ')}\n`);
+  } catch (error) {
+    onChunk(`\nError creating market: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+  }
+  break;
 
-              case 'launchPumpFunToken':
-                const { name, symbol, initialSupply, decimals } = JSON.parse(functionArgs);
-                result = await launchPumpFunToken(agent, name, symbol, initialSupply, decimals);
-                onChunk(`\nPumpFun Token Launched Successfully: \n\n`);
-                onChunk(`Token Address: ${ result.mint } \n`);
-                onChunk(`Transaction ID: ${ result.signature } \n`);
-                break;
+  case 'launchPumpFunToken':
+    try {
+      const { name, symbol, description, imageUrl, options } = JSON.parse(functionArgs);
+      const result = await launchPumpFunToken(
+        name,
+        symbol,
+        description,
+        imageUrl,
+        {
+          ...options,
+          rpcUrl: process.env.NEXT_PUBLIC_RPC_URL,
+          privateKey: process.env.SOLANA_PRIVATE_KEY
+        }
+      );
+      onChunk(`\nPumpFun Token Launched Successfully:\n\n`);
+      onChunk(`Token Address: ${result.mint}\n`);
+      onChunk(`Transaction ID: ${result.signature}\n`);
+      onChunk(`Metadata URI: ${result.metadataUri}\n`);
+    } catch (error) {
+      onChunk(`\nError launching token: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
+    }
+    break;
 
               case 'swap':
                 const { outputMint, inputAmount, inputMint, inputDecimal } = JSON.parse(functionArgs);
@@ -1868,7 +1974,7 @@ export async function streamCompletion(
         }
 
         try {
-          const content = chunk.choices[0]?.delta?.content;
+          const content = delta.content;
           if (content) {
             onChunk(content);
           }
@@ -1883,11 +1989,11 @@ export async function streamCompletion(
     } catch (error: any) {
       retries++;
       
-      // Handle rate limiting
+      // Handle rate limiting with exponential backoff
       if (error?.status === 429) {
-        logger.warn(`Rate limited.Attempt ${ retries } of ${ RATE_LIMIT.maxRetries } `);
+        logger.warn(`Rate limited. Attempt ${ retries } of ${ RATE_LIMIT.maxRetries } `);
         if (retries < RATE_LIMIT.maxRetries) {
-          await delay(RATE_LIMIT.retryDelay);
+          await delay(RATE_LIMIT.retryDelay * Math.pow(2, retries));
           continue;
         }
       }
@@ -1938,14 +2044,14 @@ export async function botCompletion(
               role: 'function' as const,
               name: msg.name!,
               content: msg.content,
-              function_call: msg.function_call
+              tool_call_id: msg.tool_call_id // Changed from function_call to tool_call_id
             };
           }
           return {
             role: msg.role as 'system' | 'user' | 'assistant',
             content: msg.content,
             ...(msg.name && { name: msg.name }),
-            ...(msg.function_call && { function_call: msg.function_call })
+            ...(msg.tool_call_id && { tool_call_id: msg.tool_call_id }) // Changed from function_call to tool_call_id
           };
         })
       ];
@@ -2046,6 +2152,98 @@ async function handleGeckoTerminalFunctions(functionName: string, functionArgs: 
   } catch (error) {
     logger.error('GeckoTerminal function error:', error);
     onChunk('\nAn error occurred while processing GeckoTerminal data.\n');
+  }
+}
+
+export class GroqService {
+  private messageManager: MessageManager;
+  private retryHandler: RetryHandler;
+
+  constructor() {
+    this.messageManager = new MessageManager();
+    this.retryHandler = new RetryHandler({
+      maxRetries: 3,
+      baseDelay: 1000,
+      maxDelay: 10000
+    });
+  }
+
+  async streamCompletion(
+    newMessages: Message[],
+    onChunk: (chunk: string) => void,
+    onError?: (error: Error) => void
+  ): Promise<void> {
+    // Add new messages
+    newMessages.forEach(msg => this.messageManager.addMessage(msg));
+
+    try {
+      await this.retryHandler.execute(
+        async () => {
+          const stream = await this.createCompletionStream(
+            this.messageManager.getMessages()
+          );
+
+          let functionCallInProgress = false;
+          let functionName = '';
+          let functionArgs = '';
+
+          for await (const chunk of stream) {
+            const delta = chunk.choices[0]?.delta as Delta;
+
+            if (delta.tool_calls) {
+              for (const toolCall of delta.tool_calls) {
+                functionCallInProgress = true;
+                functionName = toolCall.function.name;
+                functionArgs += toolCall.function.arguments;
+              }
+              continue;
+            }
+
+            if (functionCallInProgress && !delta.tool_calls) {
+              functionCallInProgress = false;
+              await handleToolCall({ name: functionName, arguments: functionArgs }, onChunk);
+              functionArgs = '';
+            }
+
+            if (delta.content) {
+              onChunk(delta.content);
+            }
+          }
+        },
+        (attempt, error) => {
+          if (onError) {
+            onError(new Error(`Retry attempt ${attempt}: ${error.message}`));
+          }
+        }
+      );
+    } catch (error) {
+      const finalError = error as Error;
+      if (onError) {
+        onError(new Error(`Final error: ${finalError.message}`));
+      }
+      throw finalError;
+    }
+  }
+
+  private async createCompletionStream(messages: Message[]) {
+    const groq = new Groq({
+      apiKey: process.env.NEXT_PUBLIC_GROQ_API_KEY!,
+      dangerouslyAllowBrowser: true
+    });
+
+    return await groq.chat.completions.create({
+      model: 'mixtral-8x7b-32768',
+      messages: messages.map(msg => ({
+        role: msg.role,
+        content: msg.content,
+        name: msg.name || '', // Ensure name is a string
+        tool_call_id: msg.tool_call_id,
+        timestamp: msg.timestamp
+      })),
+      stream: true,
+      temperature: 0.7,
+      max_tokens: 1000
+    });
   }
 }
 
