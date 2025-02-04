@@ -56,7 +56,7 @@ export async function parseTransaction(
     apiKey?: string;
     rpcUrl?: string;
   }
-): Promise<ParsedTransactionResult> {
+): Promise<ParsedTransactionResult[]> { // Change return type to an array
   try {
     // Validate signature
     if (!signature || typeof signature !== 'string') {
@@ -93,6 +93,8 @@ export async function parseTransaction(
       const connection = new Connection(config.rpcUrl);
       additionalData = await connection.getParsedTransaction(signature, 'confirmed');
     }
+
+    const results: ParsedTransactionResult[] = [];
 
     // Format response
     const result: ParsedTransactionResult = {
@@ -134,7 +136,9 @@ export async function parseTransaction(
       result.raw = transaction;
     }
 
-    return result;
+    results.push(result);
+
+    return results; // Return an array of results
 
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

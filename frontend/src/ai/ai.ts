@@ -11,10 +11,10 @@ import { agentWallet } from '@/utils/wallet';
 import { getAssetsByOwner } from '@/tools/helius/get_assets_by_owner';
 import { requestDevnetAirdrop } from '@/utils/airdrop';
 import { PublicKey, VersionedTransaction } from '@solana/web3.js';
-//import { fetchPrice } from '@/tools/jupiter/fetch_price';
+import { JupiterPriceTool } from '@/app/api/jupiter/fetch_price';
 import type { Portfolio } from '@/types/portfolio';
 import Groq from "groq-sdk";
-import { fetchPrice } from "solana-agent-kit/dist/tools/fetch_price";
+
 
 interface AIServiceConfig {
   groqApiKey: string;
@@ -48,10 +48,9 @@ interface ChatCommand {
 }
 
 interface Message {
-  role: 'system' | 'user' | 'assistant' | 'function';
+  role: 'system' | 'user' | 'assistant';
   content: string;
   name?: string; 
-  function_call?: any;
 }
 
 export class AIService {
@@ -391,10 +390,7 @@ export class AIService {
         role: 'user',
         content: message,
         name: "",
-        function_call: {
-          name: "",
-          arguments: ""
-        }
+        timestamp: 0
       }];
 
       if (context) {
@@ -517,10 +513,7 @@ export class AIService {
           Provide analysis in a clear, conversational format.
         `,
         name: "",
-        function_call: {
-          name: "",
-          arguments: ""
-        }
+        timestamp: 0
       }];
 
       await streamCompletion(messages, onChunk);
@@ -661,7 +654,8 @@ export class AIService {
 
   async fetchAndAnalyzePrice(tokenAddress: string): Promise<string> {
     try {
-      const priceData = parseFloat(await fetchPrice(new PublicKey(tokenAddress)));
+      const priceTool = new JupiterPriceTool();
+      const priceData = parseFloat(await priceTool._call(tokenAddress));
       const analysis = await this.analyzeMarket(tokenAddress);
 
       return `Price for ${tokenAddress}: $${priceData}\n` +

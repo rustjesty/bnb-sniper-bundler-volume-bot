@@ -1,13 +1,12 @@
 import React from 'react';
 import { SwapModalProps } from './chat/types';
 
-
 export const SwapModal: React.FC<SwapModalProps> = ({ 
   isVisible, 
   swapTokens, 
   onClose 
 }) => {
-  if (!isVisible || !swapTokens) return null;
+  if (!isVisible) return null;
 
   return (
     <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">

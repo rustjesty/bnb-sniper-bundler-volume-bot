@@ -14,6 +14,7 @@
     "@heroicons/react": "^2.2.0",
     "@jup-ag/api": "^6.0.38",
     "@lifi/sdk": "^3.5.2",
+    "@raydium-io/raydium-sdk-v2": "^0.1.111-alpha",
     "@solana/wallet-adapter-base": "^0.9.23",
     "@solana/wallet-adapter-react": "^0.15.35",
     "@solana/wallet-adapter-react-ui": "^0.9.35",

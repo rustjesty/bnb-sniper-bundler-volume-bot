@@ -2,7 +2,7 @@
 import { Groq } from 'groq-sdk';
 import { PublicKey, Connection } from '@solana/web3.js';
 
-
+  
 // Local utility imports
 import { getSolanaPrice, getTrendingSolanaTokens } from './coingecko';
 import { getSolanaBalance, getTransactionDetails } from './helius';
@@ -1056,7 +1056,7 @@ export async function retrieveAndFormatDocuments(
 async function reviewTransaction(signature: string): Promise<string> {
   try {
     const txData = await parseTransaction(signature);
-    return formatTransactionForChat(txData);
+    return txData.map(tx => formatTransactionForChat(tx)).join('\n\n');
   } catch (error) {
     console.error('Error reviewing transaction:', error);
     return 'Failed to parse transaction. Please check the signature and try again.';

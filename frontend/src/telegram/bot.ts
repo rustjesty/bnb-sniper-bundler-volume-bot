@@ -141,8 +141,9 @@ bot.on('message', async (msg) => {
       role: 'user',
       content: msg.text || '',
       name: '',
+      timestamp: Date.now(),
       function_call: {
-        name: '',
+        name: '', 
         arguments: ''
       }
     };
@@ -165,6 +166,7 @@ bot.on('message', async (msg) => {
         role: 'assistant',
         content: response,
         name: '',
+        timestamp: Date.now(),
         function_call: {
           name: '',
           arguments: ''

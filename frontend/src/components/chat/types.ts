@@ -8,7 +8,7 @@ export interface Message {
   content: string;
   name?: string;
   function_call?: {
-    name: string;
+    name: string;  
     arguments: string;
   };
 }
@@ -19,6 +19,22 @@ export interface SwapDetails {
   inputAmount: number;
   inputMint: string;
   inputDecimal: number;
+  amount: number; // Add amount property
+  from: string; // Add from property
+  to: string; // Add to property
+}
+
+// Add SwapModalProps interface
+export interface SwapModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  swapDetails: SwapDetails;
+  isVisible: boolean; // Add isVisible property
+  swapTokens: {
+    amount: number;
+    from: string;
+    to: string;
+  }; // Correct swapTokens property type
 }
 
 // UI component props

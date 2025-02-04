@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { 
-  Raydium} from "@raydium-io/raydium-sdk-v2";
-import { 
   getTokenDataByAddress, 
   getTokenDataByTicker,
 } from '@/tools/dexscreener/token_data_ticker'; 
@@ -13,14 +11,12 @@ import { SolanaAgentKit } from 'solana-agent-kit';
 import logger from '@/utils/logger';
 import type { MarketDataProps } from '@/types/market';
 
-import { openbookCreateMarket } from '@/tools/openbook/openbook_create_market'; 
-import BN from 'bn.js';
-import Decimal from 'decimal.js';
 import axios from 'axios';
-import { fetchPrice } from 'solana-agent-kit/dist/tools/fetch_price';
+//import { fetchPrice } from 'solana-agent-kit/dist/tools/fetch_price';
 //import { AmmMarket, AmmPool, ClmmDecrease, ClmmHarvest, ClmmIncrease, ClmmPool } from '@/tools/raydium';
 import { RaydiumWrapper } from '@/utils/raydium-wrapper';
 import { safePublicKey, isValidBase58 } from '@/utils/base58';
+import { JupiterPriceTool } from '@/app/api/jupiter';
 
 // Types
 interface TokenPrice {
@@ -78,11 +74,6 @@ const MarketData: React.FC<MarketDataProps> = ({
       }
 
       // Create safe agent
-      const agent = new SolanaAgentKit(
-        privateKey,
-        rpcUrl,
-        'confirmed'
-      );
 
       // Safely create PublicKeys
       const jennaTokenPubkey = safePublicKey(JENNA_TOKEN_ADDRESS);
@@ -116,7 +107,6 @@ const MarketData: React.FC<MarketDataProps> = ({
       try {
         const modules = await RaydiumWrapper.getModules();
         if (modules?.AmmMarket) {
-          const marketResult = await modules.AmmMarket;
           logger.success('Market module loaded successfully');
         }
       } catch (error) {
@@ -198,7 +188,7 @@ const MarketData: React.FC<MarketDataProps> = ({
       }
 
       // Fallback to Jupiter
-      const jupiterPrice = await fetchPrice(new PublicKey(address));
+      const jupiterPrice = new JupiterPriceTool();
       if (jupiterPrice) {
         return {
           price: typeof jupiterPrice === 'number' ? jupiterPrice : parseFloat(String(jupiterPrice)),
@@ -295,29 +285,8 @@ const MarketData: React.FC<MarketDataProps> = ({
     }
   };
 
-  const handleIncreaseLiquidity = async (positionId: string, amount0: number, amount1: number) => {
-    try {
-      await safePoolOperations.increaseLiquidity(positionId, amount0, amount1);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to increase liquidity');
-    }
-  };
 
-  const handleDecreaseLiquidity = async (positionId: string, liquidity: number) => {
-    try {
-      await safePoolOperations.decreaseLiquidity(positionId, liquidity);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to decrease liquidity');
-    }
-  };
 
-  const handleHarvestRewards = async (farmId: string) => {
-    try {
-      await safePoolOperations.harvestRewards(farmId);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Failed to harvest rewards');
-    }
-  };
 
   useEffect(() => {
     let intervalId: NodeJS.Timeout | null = null;

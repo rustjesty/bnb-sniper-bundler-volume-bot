@@ -122,7 +122,10 @@ const Chat: React.FC<ChatComponentProps> = ({
       inputAmount: amount,
       inputMint: match[2].toUpperCase(),
       outputMint: match[3].toUpperCase(),
-      inputDecimal: 9 // Assuming a default value for inputDecimal
+      inputDecimal: 9, // Assuming a default value for inputDecimal
+      amount: amount,
+      from: match[2].toUpperCase(),
+      to: match[3].toUpperCase()
     };
   };
 
@@ -175,11 +178,12 @@ const Chat: React.FC<ChatComponentProps> = ({
       </div>
 
       {/* Swap Modal */}
-      <SwapModal
-        isVisible={swapModalVisible}
-        swapTokens={swapTokens}
-        onClose={() => setSwapModalVisible(false)}
-      />
+      {swapTokens && (
+        <SwapModal
+          isVisible={swapModalVisible}
+          swapTokens={swapTokens}
+          onClose={() => setSwapModalVisible(false)} isOpen={false} swapDetails={swapTokens!}        />
+      )}
 
       {/* Input Area */}
       <InputArea

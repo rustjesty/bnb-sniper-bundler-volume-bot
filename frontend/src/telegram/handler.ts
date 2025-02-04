@@ -1,5 +1,5 @@
 import TelegramBot from 'node-telegram-bot-api';
-import { botCompletion, Message } from '../utils/groq';
+import { botCompletion } from '../utils/groq';
 import { elizaLogger } from "@ai16z/eliza";
 import { getSolanaPrice } from '../utils/coingecko';
 import { getTrendingTokens } from '../utils/birdeye';
@@ -10,7 +10,7 @@ import { getTrendingTokens } from '../utils/birdeye';
 async function handleCommand(command: string, chatId: number, bot: TelegramBot): Promise<string> {
   switch (command) {
     case '/price':
-      try {
+      try { 
         const priceData = await getSolanaPrice();
         return `Solana Price:\n\n` +
                `Price: $${priceData.price.toFixed(2)}\n` +
@@ -133,4 +133,14 @@ function escapeMarkdown(text: string): string {
   return text.replace(/([_*\[\]()~`>#+\-=|{}.!])/g, '\\$1');
 }
 
-export type { Message };
+// Update the Message type definition
+export type Message = {
+  role: 'user' | 'assistant';
+  content: string;
+  name: string;
+  timestamp: number;
+  function_call?: {
+    name: string;
+    arguments: string;
+  };
+};

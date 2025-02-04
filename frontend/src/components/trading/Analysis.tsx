@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import parseTransaction from '@/tools/helius/helius_transaction_parsing';
+//import parseTransaction from '@/tools/helius/helius_transaction_parsing';
 import { ScoringWalletKit } from '@/utils/scoringWallet';
 import { PublicKey } from '@solana/web3.js';
 import { SolanaAgentKit } from 'solana-agent-kit/dist/agent';
@@ -7,6 +7,7 @@ import type ChartConfig from '../Chart';
 // Import our safe utilities
 import { safePublicKey, isValidBase58 } from '@/utils/base58';
 import logger from '@/utils/logger';
+import { parseTransaction } from '@/tools/helius/helius_transaction_parsing';
 
 interface AnalysisScore {
   category: string; 
@@ -112,7 +113,7 @@ const Analysis: React.FC<AnalysisProps> = ({
         throw new Error('Failed to initialize agent');
       }
 
-      const txs = await parseTransaction(agent, walletAddress);
+      const txs = await parseTransaction(walletAddress); // Remove agent parameter
       
       // Calculate metrics with validation
       const metrics = calculateSafeMetrics(txs);
