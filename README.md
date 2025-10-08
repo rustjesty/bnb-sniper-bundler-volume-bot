@@ -1,4 +1,4 @@
-# BNB Chain Trading Bot
+# BNB Chain Trading Bot (Sniper, Bundler, Volume Bots in pancake swap and four.meme)
 
 <div align="center">
 
