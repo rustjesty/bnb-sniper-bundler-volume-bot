@@ -1,1 +1,0 @@
-All demos in this folder need to use grpc, you can contact the rpc service provider to purchase.
